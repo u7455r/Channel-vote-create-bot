@@ -4,7 +4,7 @@ import time
 import threading
 import telebot
 from telebot import types
-from flask import Flask
+from flask import Flask, request
 
 # ================= CONFIGURATION =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9224149092:AAHO-bMBo-UsquA36EB7ay-f708mk7iaFWw")
@@ -19,7 +19,7 @@ REQUIRED_CHATS = [
     {"username": "@bdgiveaways24", "url": "https://t.me/bdgiveaways24", "name": "BD Giveaways 24"},
 ]
 
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML", threaded=False)
 app = Flask(__name__)
 
 DB_FILE = "voting_bot_db.json"
@@ -194,15 +194,6 @@ TEXTS = {
         "cancelled": "❌ Current operation cancelled."
     }
 }
-
-# ================= FLASK KEEP-ALIVE =================
-@app.route("/")
-def home():
-    return "Rafim Ultimate Voting & Contest Bot is Running 24/7!"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
 
 # ================= HELPER FUNCTIONS =================
 def get_lang(user_id):
@@ -431,7 +422,6 @@ def handle_check_unlock(call):
     else:
         bot.answer_callback_query(call.id, t(call.from_user.id, "still_locked_alert"), show_alert=True)
 
-# ================= GATEKEEPER CHECK =================
 def passes_security_gate(message):
     uid = message.from_user.id
     if not check_all_joined(uid):
@@ -442,7 +432,6 @@ def passes_security_gate(message):
         return False
     return True
 
-# ================= LANGUAGE & SUPPORT =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_lang"], TEXTS["en"]["btn_lang"]])
 def menu_language(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -458,7 +447,6 @@ def menu_support(message):
         return
     bot.reply_to(message, t(message.from_user.id, "support_msg"), disable_web_page_preview=True)
 
-# ================= REFER & INVITE =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_refer"], TEXTS["en"]["btn_refer"]])
 def menu_refer(message):
     if not passes_security_gate(message):
@@ -469,7 +457,6 @@ def menu_refer(message):
     refs = db["users"][uid]["referrals"]
     bot.reply_to(message, t(message.from_user.id, "refer_info").format(ref_link=ref_link, refs=refs))
 
-# ================= 2-STEP VOTE CAMPAIGN CREATION =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_create"], TEXTS["en"]["btn_create"]])
 def menu_create_vote(message):
     if not passes_security_gate(message):
@@ -624,7 +611,6 @@ def send_campaign_card(chat_id, user_id, cid):
     else:
         bot.send_message(chat_id, card_text, reply_markup=markup, disable_web_page_preview=True)
 
-# ================= CAST VOTE HANDLER =================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("closed_info:"))
 def handle_closed_info(call):
     bot.answer_callback_query(call.id, t(call.from_user.id, "voting_closed_alert"), show_alert=True)
@@ -676,7 +662,6 @@ def handle_cast_vote(call):
     )
     send_log_to_channel(vote_log)
 
-# ================= INLINE SHARE HANDLER =================
 @bot.inline_handler(func=lambda query: True)
 def handle_inline_share(inline_query):
     q = inline_query.query.strip()
@@ -708,7 +693,6 @@ def handle_inline_share(inline_query):
     )
     bot.answer_inline_query(inline_query.id, [result], cache_time=1)
 
-# ================= MY CAMPAIGNS & CONTROLS =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_my_posts"], TEXTS["en"]["btn_my_posts"]])
 def menu_my_campaigns(message):
     if not passes_security_gate(message):
@@ -777,7 +761,6 @@ def handle_announce_winner(call):
     except Exception as e:
         bot.answer_callback_query(call.id, f"❌ Error: {e}", show_alert=True)
 
-# ================= ADMIN PANEL & VIP ACCESS =================
 def grant_vip_user(target_id):
     target_id = int(target_id)
     if target_id not in db["vip_users"]:
@@ -965,8 +948,28 @@ def handle_admin_inputs(message):
                 pass
         bot.reply_to(message, f"✅ মোট <b>{sent}</b> জন ইউজারের কাছে মেসেজ পাঠানো হয়েছে!")
 
-# ================= START BOT =================
+# ================= WEBHOOK & SERVER RUNNER =================
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+
+@app.route("/")
+def home():
+    return "Rafim Ultimate Voting & Contest Bot is Running 24/7 via Webhook!"
+
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def telegram_webhook():
+    json_str = request.get_data().decode("UTF-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
+
 if __name__ == "__main__":
-    threading.Thread(target=run_web, daemon=True).start()
-    bot.remove_webhook()
-    bot.infinity_polling(skip_pending=True)
+    if RENDER_URL:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+        port = int(os.environ.get("PORT", 10000))
+        app.run(host="0.0.0.0", port=port)
+    else:
+        bot.remove_webhook()
+        time.sleep(2)
+        bot.infinity_polling(skip_pending=True)
