@@ -955,7 +955,7 @@ RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 
 @app.route("/")
 def home():
-    return "Channel Vote Maker Bot is Running 24/7 via Webhook!"
+    return "Channel Vote Maker Bot is Running 24/7 via Webhook!", 200
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -964,14 +964,22 @@ def telegram_webhook():
     bot.process_new_updates([update])
     return "OK", 200
 
-if __name__ == "__main__":
-    if RENDER_URL:
+def setup_webhook_async():
+    time.sleep(2)
+    try:
         bot.remove_webhook()
         time.sleep(1)
-        bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+        if RENDER_URL:
+            bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+    except Exception as e:
+        print("Webhook setup error:", e)
+
+if __name__ == "__main__":
+    if RENDER_URL:
+        threading.Thread(target=setup_webhook_async, daemon=True).start()
         port = int(os.environ.get("PORT", 10000))
         app.run(host="0.0.0.0", port=port)
     else:
         bot.remove_webhook()
-        time.sleep(2)
+        time.sleep(1)
         bot.infinity_polling(skip_pending=True)
