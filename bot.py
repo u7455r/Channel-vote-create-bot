@@ -2,6 +2,7 @@ import os
 import json
 import time
 import threading
+from datetime import datetime
 import telebot
 from telebot import types
 from flask import Flask, request
@@ -36,12 +37,15 @@ def load_db():
             data = json.load(f)
             if "vip_users" not in data:
                 data["vip_users"] = []
+            if "verified_users" not in data:
+                data["verified_users"] = []
             if not data.get("log_channel"):
                 data["log_channel"] = DEFAULT_LOG_CHANNEL
             return data
     return {
         "log_channel": DEFAULT_LOG_CHANNEL,
         "vip_users": [],
+        "verified_users": [],
         "users": {},
         "polls": {},
         "poll_counter": 100
@@ -75,7 +79,7 @@ TEXTS = {
         "welcome": (
             "😇 <b>স্বাগতম {name}!</b>\n"
             "নিচের বাটন থেকে অপশন নির্বাচন করুন এবং চ্যানেলে নিজের পোল তৈরি করুন।\n\n"
-            "🔓 <b>স্ট্যাটাস:</b> আনলকড ✅ | 👥 <b>রেফার:</b> {refs} জন"
+            "🔓 <b>স্ট্যাটাস:</b> আনলকড ✅ | 👥 <b>রেফার:</b> {refs} জন{v_badge}"
         ),
         "btn_create": "📣 চ্যানেল পোল তৈরি",
         "btn_edit": "✏️ পোল এডিট করুন",
@@ -170,7 +174,7 @@ TEXTS = {
         "welcome": (
             "😇 <b>Welcome {name}!</b>\n"
             "Select an option below to create and manage your channel polls.\n\n"
-            "🔓 <b>Status:</b> Unlocked ✅ | 👥 <b>Referrals:</b> {refs}"
+            "🔓 <b>Status:</b> Unlocked ✅ | 👥 <b>Referrals:</b> {refs}{v_badge}"
         ),
         "btn_create": "📣 Create Channel Poll",
         "btn_edit": "✏️ Edit Polls",
@@ -253,6 +257,12 @@ def t(user_id, key):
 def is_vip(user_id):
     return user_id == ADMIN_ID or int(user_id) in db.get("vip_users", [])
 
+def is_verified_creator(user_id):
+    uid_int = int(user_id)
+    if uid_int == ADMIN_ID or uid_int in db.get("vip_users", []) or uid_int in db.get("verified_users", []):
+        return True
+    return db["users"].get(str(uid_int), {}).get("referrals", 0) >= 5
+
 def is_unlocked(user_id):
     if is_vip(user_id):
         return True
@@ -322,15 +332,34 @@ def make_progress_bar(count, total):
     bar = "▓" * filled + "░" * (8 - filled)
     return f"{bar} {pct}%"
 
+def get_rank_medals(options):
+    # ভোটের সংখ্যার ওপর ভিত্তি করে 🥇 🥈 🥉 র‍্যাংক নির্ধারণ
+    counts = sorted(list(set(len(o["voters"]) for o in options if len(o["voters"]) > 0)), reverse=True)
+    medals = {}
+    for idx, o in enumerate(options):
+        c = len(o["voters"])
+        if c == 0 or not counts:
+            medals[idx] = "🔥"
+        elif c == counts[0]:
+            medals[idx] = "🥇"
+        elif len(counts) > 1 and c == counts[1]:
+            medals[idx] = "🥈"
+        elif len(counts) > 2 and c == counts[2]:
+            medals[idx] = "🥉"
+        else:
+            medals[idx] = "🔥"
+    return medals
+
 def build_channel_poll_caption(poll_id):
     poll = db["polls"][poll_id]
     total_votes = sum(len(o["voters"]) for o in poll["options"])
+    medals = get_rank_medals(poll["options"])
 
     stats_lines = []
-    for o in poll["options"]:
+    for idx, o in enumerate(poll["options"]):
         cnt = len(o["voters"])
         p_bar = make_progress_bar(cnt, total_votes)
-        stats_lines.append(f"▫️ <b>{o['name']}</b> — <code>{cnt}</code>\n   <code>{p_bar}</code>")
+        stats_lines.append(f"{medals[idx]} <b>{o['name']}</b> — <code>{cnt}</code>\n   <code>{p_bar}</code>")
     stats_block = "\n".join(stats_lines)
 
     timer_info = ""
@@ -341,10 +370,12 @@ def build_channel_poll_caption(poll_id):
             mins = (rem_sec % 3600) // 60
             timer_info = f"\n⏳ <b>Time Left:</b> {hrs}h {mins}m"
 
+    verified_line = "\n✅ <b>Verified Organizer</b>" if is_verified_creator(poll["owner_id"]) else ""
+
     return (
         f"🗳 <b>{poll['question']}</b>\n\n"
         f"{stats_block}\n\n"
-        f"📈 <b>Total Votes:</b> <code>{total_votes}</code>{timer_info}\n"
+        f"📈 <b>Total Votes:</b> <code>{total_votes}</code>{timer_info}{verified_line}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⚡ Poll Create :- @{BOT_USERNAME}\n"
         f"📢 Join :- {PROMO_CHANNEL}"
@@ -354,10 +385,12 @@ def build_channel_poll_markup(poll_id):
     poll = db["polls"][poll_id]
     markup = types.InlineKeyboardMarkup(row_width=1)
     is_open = poll.get("is_open", True)
+    medals = get_rank_medals(poll["options"])
 
     for idx, opt in enumerate(poll["options"]):
         v_count = len(opt["voters"])
-        btn_text = f"🗳 {v_count} | 🔥 {opt['name']}" if is_open else f"🔒 {v_count} | {opt['name']}"
+        medal = medals[idx]
+        btn_text = f"🗳 {v_count} | {medal} {opt['name']}" if is_open else f"🔒 {v_count} | {medal} {opt['name']}"
         cb = f"pvote:{poll_id}:{idx}" if is_open else f"pclosed:{poll_id}"
         markup.add(types.InlineKeyboardButton(btn_text, callback_data=cb))
 
@@ -386,6 +419,36 @@ def refresh_channel_poll_message(pid):
     except Exception as e:
         print("Refresh channel message error:", e)
 
+def build_hourly_graph_report(pid):
+    poll = db["polls"].get(pid)
+    if not poll:
+        return "❌ পোল পাওয়া যায়নি।"
+    hourly = poll.get("hourly_votes", {})
+    total_v = sum(len(o["voters"]) for o in poll["options"])
+
+    if not hourly or total_v == 0:
+        return (
+            f"📈 <b>Hourly Vote Analytics (Poll #{pid})</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📭 এই পোলে এখনো কোনো ভোট পড়েনি।"
+        )
+
+    max_v = max(hourly.values())
+    peak_hour = max(hourly, key=hourly.get)
+    lines = [
+        f"📈 <b>Hourly Vote Graph & Analytics (Poll #{pid})</b>",
+        f"📣 <b>চ্যানেল:</b> {poll['channel_username']}",
+        f"🔥 <b>Peak Voting Hour:</b> <code>{peak_hour}</code> ({max_v} ভোট)",
+        "━━━━━━━━━━━━━━━━━━━━"
+    ]
+    for hr, cnt in sorted(hourly.items()):
+        bar_len = max(1, round((cnt / max_v) * 10))
+        bar = "▇" * bar_len
+        lines.append(f"🕒 <code>{hr}</code> | <code>{bar}</code> <b>{cnt}</b>")
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    lines.append(f"📊 <b>সর্বমোট ভোট:</b> <code>{total_v}</code>")
+    return "\n".join(lines)
+
 def announce_poll_winner(pid, auto_closed=False):
     poll = db["polls"].get(pid)
     if not poll:
@@ -398,14 +461,18 @@ def announce_poll_winner(pid, auto_closed=False):
     sorted_opts = sorted(poll["options"], key=lambda x: len(x["voters"]), reverse=True)
     winner = sorted_opts[0] if sorted_opts else {"name": "N/A", "voters": []}
     total_v = sum(len(o["voters"]) for o in poll["options"])
-    standings = "\n".join([f"{idx+1}. <b>{o['name']}</b> — <code>{len(o['voters'])}</code> ভোট" for idx, o in enumerate(sorted_opts)])
+    rank_icons = ["🥇", "🥈", "🥉"]
+    standings = "\n".join([
+        f"{rank_icons[idx] if idx < 3 else f'{idx+1}.'} <b>{o['name']}</b> — <code>{len(o['voters'])}</code> ভোট"
+        for idx, o in enumerate(sorted_opts)
+    ])
     reason_tag = "⏰ নির্ধারিত সময় শেষ (Auto-Closed)" if auto_closed else "🛑 ভোটিং সমাপ্ত"
 
     win_msg = (
         f"🏆🎉 <b>FINAL POLL RESULT (#{pid})</b> 🎉🏆\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"❓ <b>প্রশ্ন:</b> {poll['question']}\n\n"
-        f"👑 <b>বিজয়ী (Winner):</b> 🔥 <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)\n\n"
+        f"👑 <b>বিজয়ী (Winner):</b> 🥇 <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)\n\n"
         f"📊 <b>চূড়ান্ত ফলাফল (মোট {total_v} ভোট):</b>\n"
         f"{standings}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -415,7 +482,7 @@ def announce_poll_winner(pid, auto_closed=False):
         bot.send_message(poll["channel_id"], win_msg)
     except Exception:
         pass
-    send_log_to_channel(f"🏁 <b>পোল #{pid} সমাপ্ত হয়েছে!</b> ({poll['channel_username']})\n👑 বিজয়ী: <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)")
+    send_log_to_channel(f"🏁 <b>পোল #{pid} সমাপ্ত হয়েছে!</b> ({poll['channel_username']})\n🥇 বিজয়ী: <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)")
 
 # ================= AUTO-TIMER BACKGROUND WORKER =================
 def auto_close_watcher():
@@ -447,8 +514,10 @@ def register_user(user, ref_by=None):
         if ref_by and ref_by != uid and ref_by in db["users"]:
             db["users"][uid]["referred_by"] = ref_by
             db["users"][ref_by]["referrals"] += 1
+            new_ref_cnt = db["users"][ref_by]["referrals"]
+            bonus_txt = "\n🏅 <b>দারুণ! ৫টি রেফার পূর্ণ হওয়ায় আপনি '✅ Verified Organizer' ব্যাজ পেয়েছেন!</b>" if new_ref_cnt == 5 else ""
             try:
-                bot.send_message(int(ref_by), f"🎊 অভিনন্দন! <b>{user.first_name}</b> আপনার রেফারে জয়েন করেছেন! বট আনলক হয়েছে 🔓")
+                bot.send_message(int(ref_by), f"🎊 অভিনন্দন! <b>{user.first_name}</b> আপনার রেফারে জয়েন করেছেন! বট আনলক হয়েছে 🔓{bonus_txt}")
             except Exception:
                 pass
         save_db(db)
@@ -480,7 +549,8 @@ def send_dashboard(chat_id, user):
         send_lock_screen(chat_id, user.id)
         return
     refs = db["users"][str(user.id)]["referrals"]
-    bot.send_message(chat_id, t(user.id, "welcome").format(name=user.first_name, refs=refs), reply_markup=main_menu_keyboard(user.id))
+    v_badge = " | ✅ <b>Verified Organizer</b>" if is_verified_creator(user.id) else ""
+    bot.send_message(chat_id, t(user.id, "welcome").format(name=user.first_name, refs=refs, v_badge=v_badge), reply_markup=main_menu_keyboard(user.id))
 
 def passes_gate(message):
     uid = message.from_user.id
@@ -500,7 +570,6 @@ def handle_start(message):
     args = message.text.split()
     payload = args[1] if len(args) > 1 else ""
 
-    # ডিরেক্ট ক্যান্ডিডেট ভোট লিংক হ্যান্ডলার (?start=v_101_0)
     if payload.startswith("v_"):
         register_user(message.from_user)
         parts = payload.split("_")
@@ -623,9 +692,15 @@ def menu_refer(message):
     uid = str(message.from_user.id)
     ref_link = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
     refs = db["users"][uid]["referrals"]
-    bot.send_message(message.chat.id, f"🔗 <b>রেফারেল লিংক:</b>\n<code>{ref_link}</code>\n\n👥 <b>মোট রেফার:</b> {refs} জন")
+    v_status = "✅ Verified Organizer (Active)" if is_verified_creator(message.from_user.id) else f"🔒 আরও {max(0, 5-refs)}টি রেফার করলে '✅ Verified Organizer' ব্যাজ পাবেন!"
+    bot.send_message(
+        message.chat.id,
+        f"🔗 <b>রেফারেল লিংক:</b>\n<code>{ref_link}</code>\n\n"
+        f"👥 <b>মোট রেফার:</b> {refs} জন\n"
+        f"🏅 <b>ব্যাজ স্ট্যাটাস:</b> {v_status}"
+    )
 
-# ================= POLL CREATION WIZARD (WITH TIMER & ADMIN CHECK) =================
+# ================= POLL CREATION WIZARD =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_create"], TEXTS["en"]["btn_create"]])
 def menu_create_poll(message):
     if not passes_gate(message):
@@ -722,10 +797,12 @@ def build_draft_preview(uid):
     has_pic = "হ্যাঁ ✅" if d.get("photo_id") else "না"
     hrs = d.get("timer_hours", 0)
     timer_label = f"{hrs} ঘণ্টা পর অটো বন্ধ হবে" if hrs > 0 else "Manual (ম্যানুয়াল বন্ধ)"
+    v_tag = "✅ Verified Organizer" if is_verified_creator(uid) else "Standard Organizer"
 
     text = (
         f"📊 <b>পোলের ফাইনাল প্রিভিউ:</b>\n\n"
         f"📣 <b>চ্যানেল:</b> {d['channel_title']} ({d['channel_username']})\n"
+        f"🏅 <b>ক্রিয়েটর ব্যাজ:</b> {v_tag}\n"
         f"❓ <b>প্রশ্ন:</b> {d['question']}\n"
         f"🖼 <b>ছবি যুক্ত:</b> {has_pic}\n"
         f"⏳ <b>অটো টাইমার:</b> {timer_label}\n\n"
@@ -810,6 +887,7 @@ def cb_publish_poll(call):
         "question": d["question"],
         "photo_id": d.get("photo_id"),
         "options": options_data,
+        "hourly_votes": {},
         "message_id": None,
         "close_at": close_at,
         "is_open": True,
@@ -837,7 +915,6 @@ def cb_publish_poll(call):
     except Exception:
         pass
 
-    # ক্রিয়েটরকে ডিরেক্ট ক্যান্ডিডেট ভোট লিংকসহ মেসেজ পাঠানো
     direct_links_list = "\n".join([
         f"🔥 <b>{o['name']}:</b> <code>https://t.me/{BOT_USERNAME}?start=v_{pid}_{idx}</code>"
         for idx, o in enumerate(options_data)
@@ -864,7 +941,7 @@ def cb_publish_poll(call):
     )
     send_log_to_channel(auto_log)
 
-# ================= LIVE VOTING, WITHDRAW & CLOSE =================
+# ================= LIVE VOTING, HOURLY TRACKING, WITHDRAW & CLOSE =================
 def process_vote_action(call, pid, opt_idx, from_direct=False):
     voter = call.from_user
     vid = voter.id
@@ -893,6 +970,13 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
     poll["options"][opt_idx]["voters"].append(vid)
     if not from_direct:
         poll["message_id"] = call.message.message_id
+
+    # আওয়ারলি ভোট গ্রাফ ডাটা আপডেট
+    hour_key = datetime.now().strftime("%I %p")
+    if "hourly_votes" not in poll:
+        poll["hourly_votes"] = {}
+    poll["hourly_votes"][hour_key] = poll["hourly_votes"].get(hour_key, 0) + 1
+
     save_db(db)
 
     chosen_name = poll["options"][opt_idx]["name"]
@@ -980,7 +1064,7 @@ def cb_close_poll_from_channel(call):
     bot.answer_callback_query(call.id, "🛑 পোলটি বন্ধ করে দেওয়া হয়েছে!", show_alert=True)
     refresh_channel_poll_message(pid)
 
-# ================= FULL EDIT POLLS MENU (ADD, REMOVE, QUESTION, WINNER, CLOSE, DELETE) =================
+# ================= FULL EDIT POLLS & ANALYTICS MENU =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_edit"], TEXTS["en"]["btn_edit"]])
 def menu_edit_polls(message):
     if not passes_gate(message):
@@ -991,7 +1075,7 @@ def menu_edit_polls(message):
         bot.send_message(message.chat.id, "📭 আপনি এখনো কোনো পোল তৈরি করেননি।")
         return
 
-    lines = ["✏️ <b>আপনার তৈরি করা পোলসমূহ (এডিট করতে বাটনে চাপুন):</b>\n"]
+    lines = ["✏️ <b>আপনার তৈরি করা পোলসমূহ (এডিট ও গ্রাফ দেখতে বাটনে চাপুন):</b>\n"]
     markup = types.InlineKeyboardMarkup(row_width=2)
     for p in my_polls[-10:]:
         st = "🟢 চালু" if p.get("is_open", True) else "🔴 বন্ধ"
@@ -1008,14 +1092,27 @@ def menu_edit_polls(message):
             types.InlineKeyboardButton(f"➖ নাম বাদ #{p['id']}", callback_data=f"editrem:{p['id']}")
         )
         markup.add(
-            types.InlineKeyboardButton(f"📝 প্রশ্ন এডিট #{p['id']}", callback_data=f"editq:{p['id']}"),
+            types.InlineKeyboardButton(f"📈 ভোট গ্রাফ #{p['id']}", callback_data=f"editgraph:{p['id']}"),
             types.InlineKeyboardButton(f"🏆 উইনার ঘোষণা #{p['id']}", callback_data=f"editwin:{p['id']}")
         )
         markup.add(
-            types.InlineKeyboardButton(btn_txt, callback_data=f"edittoggle:{p['id']}"),
+            types.InlineKeyboardButton(f"📝 প্রশ্ন এডিট #{p['id']}", callback_data=f"editq:{p['id']}"),
+            types.InlineKeyboardButton(btn_txt, callback_data=f"edittoggle:{p['id']}")
+        )
+        markup.add(
             types.InlineKeyboardButton(f"🗑 ডিলিট #{p['id']}", callback_data=f"editdel:{p['id']}")
         )
     bot.send_message(message.chat.id, "\n".join(lines), reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("editgraph:"))
+def cb_edit_graph(call):
+    pid = call.data.split(":")[1]
+    poll = db["polls"].get(pid)
+    if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
+        return
+    report = build_hourly_graph_report(pid)
+    bot.send_message(call.message.chat.id, report)
+    bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("editadd:"))
 def cb_edit_add_candidate(call):
@@ -1143,14 +1240,14 @@ def cb_edit_delete(call):
     save_db(db)
     bot.answer_callback_query(call.id, f"🗑 পোল #{pid} মুছে ফেলা হয়েছে!", show_alert=True)
 
-# ================= ADMIN PANEL & VIP BYPASS =================
+# ================= ADMIN PANEL, VIP & VERIFIED ORGANIZER =================
 def grant_vip(tid):
     tid = int(tid)
     if tid not in db["vip_users"]:
         db["vip_users"].append(tid)
         save_db(db)
     try:
-        bot.send_message(tid, "👑 অ্যাডমিন আপনাকে <b>VIP Direct Access 🔓</b> দিয়েছেন! /start চাপুন।")
+        bot.send_message(tid, "👑 অ্যাডমিন আপনাকে <b>VIP Direct Access 🔓</b> ও <b>✅ Verified Organizer</b> ব্যাজ দিয়েছেন! /start চাপুন।")
     except Exception:
         pass
 
@@ -1163,7 +1260,7 @@ def cmd_vip(message):
         bot.reply_to(message, "ব্যবহার: <code>/vip 123456789</code>")
         return
     grant_vip(int(parts[1]))
-    bot.reply_to(message, f"✅ User ID <code>{parts[1]}</code>-কে VIP Access দেওয়া হয়েছে!")
+    bot.reply_to(message, f"✅ User ID <code>{parts[1]}</code>-কে VIP Access ও Verified ব্যাজ দেওয়া হয়েছে!")
 
 @bot.message_handler(commands=["unvip"])
 def cmd_unvip(message):
@@ -1178,6 +1275,20 @@ def cmd_unvip(message):
         db["vip_users"].remove(tid)
         save_db(db)
     bot.reply_to(message, f"🔒 User ID <code>{tid}</code>-এর VIP Access বাতিল করা হয়েছে।")
+
+@bot.message_handler(commands=["verifyuser"])
+def cmd_verify_user(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.reply_to(message, "ব্যবহার: <code>/verifyuser 123456789</code>")
+        return
+    tid = int(parts[1])
+    if tid not in db["verified_users"]:
+        db["verified_users"].append(tid)
+        save_db(db)
+    bot.reply_to(message, f"✅ User ID <code>{tid}</code>-কে <b>Verified Organizer</b> ব্যাজ দেওয়া হয়েছে!")
 
 @bot.message_handler(commands=["setlog"])
 def cmd_setlog(message):
@@ -1226,7 +1337,7 @@ def cb_admin(call):
     elif act == "users":
         lines = ["👥 <b>Recent Users & Referrals:</b>\n"]
         for u in list(db["users"].values())[-25:]:
-            st = "👑" if int(u["id"]) in db["vip_users"] else ("🔓" if u.get("referrals", 0) >= 1 else "🔒")
+            st = "👑" if int(u["id"]) in db["vip_users"] else ("✅" if is_verified_creator(u["id"]) else ("🔓" if u.get("referrals", 0) >= 1 else "🔒"))
             lines.append(f"{st} <b>{u['name']}</b> ({u['username']}) | ID: <code>{u['id']}</code> | Refs: <b>{u.get('referrals', 0)}</b>")
         bot.send_message(ADMIN_ID, "\n".join(lines))
     elif act == "polls":
@@ -1276,7 +1387,7 @@ RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 
 @app.route("/")
 def home():
-    return "Channel Vote Maker (@Votemaker5bot) Pro Edition is Live 24/7!", 200
+    return "Channel Vote Maker (@Votemaker5bot) Ultimate Edition is Live 24/7!", 200
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
