@@ -88,13 +88,19 @@ TEXTS = {
         "create_prompt_inline": "😇 নিচের বাটন থেকে অপশন নির্বাচন করুন এবং চ্যানেলে নিজের পোল তৈরি করুন।",
         "create_now_btn": "🗳 Create Now Poll 🚀",
         "ask_channel": (
-            "📢 <b>এখন আপনার চ্যানেলের লিংক বা ইউজারনেম পাঠান</b>\n\n"
-            "উদাহরণস্বরূপ 👉 <code>@mychannel</code> অথবা <code>https://t.me/mychannel</code>\n\n"
-            "⚠️ <i>বিঃদ্রঃ আগে এই বটটিকে আপনার চ্যানেলে Admin হিসেবে যুক্ত করুন।</i>"
+            "📢 <b>এখন আপনার চ্যানেল বা গ্রুপের লিংক / ইউজারনেম / ID পাঠান</b>\n\n"
+            "উদাহরণস্বরূপ 👉 <code>@mychannel</code> অথবা <code>https://t.me/mychannel</code> অথবা <code>-1001234567890</code>\n\n"
+            "⚠️ <b>শর্তাবলী:</b>\n"
+            "১. আপনাকে অবশ্যই ওই চ্যানেল/গ্রুপের <b>Owner বা Admin</b> হতে হবে।\n"
+            "২. এই বটটিকেও ওই চ্যানেল/গ্রুপে <b>Admin</b> হিসেবে যুক্ত রাখতে হবে।"
         ),
         "not_bot_admin": (
-            "❌ <b>Error! বটটি ওই চ্যানেলে Admin নয় বা চ্যানেলটি খুঁজে পাওয়া যায়নি।</b>\n\n"
-            "আগে বটকে চ্যানেলে Admin বানিয়ে আবার চ্যানেলের <code>@username</code> পাঠান:"
+            "❌ <b>Error! বটটি ওই চ্যানেল/গ্রুপে Admin নয় অথবা চ্যানেলটি খুঁজে পাওয়া যায়নি।</b>\n\n"
+            "আগে বটকে চ্যানেলে Admin বানিয়ে আবার চ্যানেলের <code>@username</code> বা ID পাঠান:"
+        ),
+        "not_user_admin": (
+            "🚫 <b>অ্যাক্সেস প্রত্যাখ্যাত! আপনি এই চ্যানেল বা গ্রুপের Admin বা Owner নন।</b>\n\n"
+            "অন্য কারো চ্যানেলে পোল তৈরি করা সম্পূর্ণ নিষিদ্ধ! শুধুমাত্র যে চ্যানেল বা গ্রুপের আপনি নিজে <b>Admin/Owner</b>, সেটির <code>@username</code> বা ID পাঠান:"
         ),
         "ask_question": (
             "❓ <b>আপনার পোলের জন্য প্রশ্ন পাঠান</b>\n\n"
@@ -127,7 +133,7 @@ TEXTS = {
             "━━━━━━━━━━━━━━━━━━━━\n"
             "ℹ️ <b>নোট:</b>\n"
             "• সর্বোচ্চ ৩০ জনের নাম দিতে পারবেন\n"
-            "• আরো নাম যোগ করতে পোল এডিট মেনু ব্যবহার করুন"
+            "• পরে আরো নাম যোগ করতে পোল এডিট মেনু ব্যবহার করুন"
         ),
         "invalid_options": "❌ কমপক্ষে ১ জন এবং সর্বোচ্চ ৩০ জন প্রার্থীর নাম <code>&amp;</code> চিহ্ন দিয়ে লিখুন!",
         "poll_sent": "🚀 <b>আপনার চ্যানেলে পোল পাঠানো হয়েছে।</b>\n\n🗳 পোলটি স্বয়ংক্রিয়ভাবে ট্র্যাক করা হচ্ছে।",
@@ -178,13 +184,19 @@ TEXTS = {
         "create_prompt_inline": "😇 Click the button below to create a new poll for your channel.",
         "create_now_btn": "🗳 Create Now Poll 🚀",
         "ask_channel": (
-            "📢 <b>Now send your channel link or @username</b>\n\n"
-            "Example 👉 <code>@mychannel</code> or <code>https://t.me/mychannel</code>\n\n"
-            "⚠️ <i>Note: Make sure this bot is added as an Admin in your channel first.</i>"
+            "📢 <b>Now send your channel or group link / @username / ID</b>\n\n"
+            "Example 👉 <code>@mychannel</code> or <code>https://t.me/mychannel</code> or <code>-1001234567890</code>\n\n"
+            "⚠️ <b>Requirements:</b>\n"
+            "1. You must be an <b>Owner or Admin</b> of that channel/group.\n"
+            "2. This bot must also be added as an <b>Admin</b> there."
         ),
         "not_bot_admin": (
-            "❌ <b>Error! Bot is not an Admin in that channel or channel not found.</b>\n\n"
-            "Add the bot as Admin first, then send the channel <code>@username</code> again:"
+            "❌ <b>Error! Bot is not an Admin in that channel/group or not found.</b>\n\n"
+            "Add the bot as Admin first, then send the channel <code>@username</code> or ID again:"
+        ),
+        "not_user_admin": (
+            "🚫 <b>Access Denied! You are NOT an Admin or Owner of this channel/group.</b>\n\n"
+            "Creating polls in someone else's channel is strictly prohibited! Please enter a channel/group where you are an <b>Admin/Owner</b>:"
         ),
         "ask_question": (
             "❓ <b>Send the question/title for your poll</b>\n\n"
@@ -482,7 +494,7 @@ def menu_refer(message):
     refs = db["users"][uid]["referrals"]
     bot.send_message(message.chat.id, f"🔗 <b>রেফারেল লিংক:</b>\n<code>{ref_link}</code>\n\n👥 <b>মোট রেফার:</b> {refs} জন")
 
-# ================= POLL CREATION WIZARD =================
+# ================= POLL CREATION WIZARD (STRICT ADMIN/OWNER CHECK) =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_create"], TEXTS["en"]["btn_create"]])
 def menu_create_poll(message):
     if not passes_gate(message):
@@ -510,16 +522,29 @@ def wizard_step_channel(message):
     try:
         bot_id = bot.get_me().id
         chat = bot.get_chat(target)
-        member = bot.get_chat_member(chat.id, bot_id)
-        if member.status not in ["administrator", "creator"]:
+
+        # ১ম চেক: বট ওই চ্যানেল/গ্রুপের Admin কি না
+        bot_member = bot.get_chat_member(chat.id, bot_id)
+        if bot_member.status not in ["administrator", "creator"]:
             bot.send_message(message.chat.id, t(uid, "not_bot_admin"), reply_markup=cancel_keyboard(uid))
+            return
+
+        # ২য় চেক: যিনি ভোট বানাচ্ছেন তিনি নিজে ওই চ্যানেল/গ্রুপের Admin বা Owner কি না
+        user_member = bot.get_chat_member(chat.id, uid)
+        if user_member.status not in ["administrator", "creator"] and uid != ADMIN_ID:
+            bot.send_message(message.chat.id, t(uid, "not_user_admin"), reply_markup=cancel_keyboard(uid))
             return
 
         draft_polls[uid]["channel_id"] = chat.id
         draft_polls[uid]["channel_username"] = f"@{chat.username}" if chat.username else str(chat.id)
         draft_polls[uid]["channel_title"] = chat.title or target
+        draft_polls[uid]["user_role"] = user_member.status
         user_states[uid] = "step_question"
-        bot.send_message(message.chat.id, t(uid, "ask_question"), reply_markup=cancel_keyboard(uid))
+        bot.send_message(
+            message.chat.id,
+            f"✅ <b>ভেরিফাই সফল!</b> ({chat.title or target} — আপনার পদবী: <b>{user_member.status.upper()}</b>)\n\n" + t(uid, "ask_question"),
+            reply_markup=cancel_keyboard(uid)
+        )
     except Exception:
         bot.send_message(message.chat.id, t(uid, "not_bot_admin"), reply_markup=cancel_keyboard(uid))
 
@@ -689,7 +714,7 @@ def cb_publish_poll(call):
     auto_log = (
         f"🆕 <b>নতুন ভোট/পোল তৈরি হয়েছে! (Poll #{pid})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>যিনি ভোট বানিয়েছেন:</b> {call.from_user.first_name}\n"
+        f"👤 <b>যিনি ভোট বানিয়েছেন:</b> {call.from_user.first_name} ({d.get('user_role', 'Admin').upper()})\n"
         f"🔰 <b>ক্রিয়েটর ইউজারনেম:</b> {creator_uname}\n"
         f"🆔 <b>ক্রিয়েটর আইডি:</b> <code>{uid}</code>\n"
         f"📢 <b>যে চ্যানেলে বানানো হয়েছে:</b> {d['channel_title']}\n"
@@ -837,7 +862,7 @@ def cb_close_poll_from_channel(call):
     except Exception:
         pass
 
-# ================= FULL EDIT POLLS MENU (ADD NAME, EDIT QUESTION, CLOSE, DELETE) =================
+# ================= FULL EDIT POLLS MENU (ADD NAME, EDIT QUESTION, WINNER, CLOSE, DELETE) =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_edit"], TEXTS["en"]["btn_edit"]])
 def menu_edit_polls(message):
     if not passes_gate(message):
@@ -865,7 +890,10 @@ def menu_edit_polls(message):
             types.InlineKeyboardButton(f"📝 প্রশ্ন এডিট #{p['id']}", callback_data=f"editq:{p['id']}")
         )
         markup.add(
-            types.InlineKeyboardButton(btn_txt, callback_data=f"edittoggle:{p['id']}"),
+            types.InlineKeyboardButton(f"🏆 উইনার ঘোষণা #{p['id']}", callback_data=f"editwin:{p['id']}"),
+            types.InlineKeyboardButton(btn_txt, callback_data=f"edittoggle:{p['id']}")
+        )
+        markup.add(
             types.InlineKeyboardButton(f"🗑 ডিলিট #{p['id']}", callback_data=f"editdel:{p['id']}")
         )
     bot.send_message(message.chat.id, "\n".join(lines), reply_markup=markup)
@@ -948,6 +976,40 @@ def process_edit_question(message):
         f"✅ পোল <b>#{pid}</b>-এর প্রশ্ন সফলভাবে আপডেট করা হয়েছে!",
         reply_markup=main_menu_keyboard(uid)
     )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("editwin:"))
+def cb_edit_winner(call):
+    pid = call.data.split(":")[1]
+    poll = db["polls"].get(pid)
+    if not poll:
+        return
+    if call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID:
+        return
+
+    poll["is_open"] = False
+    save_db(db)
+    refresh_channel_poll_message(pid)
+
+    sorted_opts = sorted(poll["options"], key=lambda x: len(x["voters"]), reverse=True)
+    winner = sorted_opts[0]
+    total_v = sum(len(o["voters"]) for o in poll["options"])
+    standings = "\n".join([f"{idx+1}. <b>{o['name']}</b> — <code>{len(o['voters'])}</code> ভোট" for idx, o in enumerate(sorted_opts)])
+
+    win_msg = (
+        f"🏆🎉 <b>FINAL POLL RESULT (#{pid})</b> 🎉🏆\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"❓ <b>প্রশ্ন:</b> {poll['question']}\n\n"
+        f"👑 <b>বিজয়ী (Winner):</b> 🔥 <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)\n\n"
+        f"📊 <b>চূড়ান্ত ফলাফল (মোট {total_v} ভোট):</b>\n"
+        f"{standings}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🛑 <b>স্ট্যাটাস:</b> ভোটিং সমাপ্ত"
+    )
+    try:
+        bot.send_message(poll["channel_id"], win_msg)
+        bot.answer_callback_query(call.id, "🏆 চ্যানেলে উইনার রেজাল্ট পোস্ট করা হয়েছে!", show_alert=True)
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"❌ Error: {e}", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("edittoggle:"))
 def cb_edit_toggle(call):
