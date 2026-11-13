@@ -11,6 +11,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "9224149092:AAHO-bMBo-UsquA36EB7ay-f708m
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8298133943"))
 ADMIN_USERNAME = "@rafimhossen"
 BOT_USERNAME = "Votemaker5bot"
+DEFAULT_LOG_CHANNEL = "@optchannel6"
 
 REQUIRED_CHATS = [
     {"username": "@optchannel6", "url": "https://t.me/optchannel6", "name": "Opt Channel 6"},
@@ -34,9 +35,11 @@ def load_db():
             data = json.load(f)
             if "vip_users" not in data:
                 data["vip_users"] = []
+            if not data.get("log_channel"):
+                data["log_channel"] = DEFAULT_LOG_CHANNEL
             return data
     return {
-        "log_channel": os.environ.get("LOG_CHANNEL", ""),
+        "log_channel": DEFAULT_LOG_CHANNEL,
         "vip_users": [],
         "users": {},
         "polls": {},
@@ -292,7 +295,7 @@ def send_lock_screen(chat_id, user_id):
     bot.send_message(chat_id, t(user_id, "bot_locked_screen").format(ref_link=ref_link, refs=refs), reply_markup=markup)
 
 def send_log_to_channel(text):
-    log_ch = db.get("log_channel", "")
+    log_ch = db.get("log_channel") or DEFAULT_LOG_CHANNEL
     if log_ch:
         try:
             bot.send_message(log_ch, text, disable_web_page_preview=True)
@@ -463,7 +466,7 @@ def menu_refer(message):
     refs = db["users"][uid]["referrals"]
     bot.send_message(message.chat.id, f"🔗 <b>রেফারেল লিংক:</b>\n<code>{ref_link}</code>\n\n👥 <b>মোট রেফার:</b> {refs} জন")
 
-# ================= POLL CREATION WIZARD (SCREENSHOT FLOW) =================
+# ================= POLL CREATION WIZARD =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_create"], TEXTS["en"]["btn_create"]])
 def menu_create_poll(message):
     if not passes_gate(message):
@@ -478,11 +481,7 @@ def cb_start_wizard(call):
         return
     uid = call.from_user.id
     user_states[uid] = "step_channel"
-    draft_polls[uid] = {
-        "photo_check": True,
-        "username_check": True,
-        "fake_check": True
-    }
+    draft_polls[uid] = {}
     bot.send_message(call.message.chat.id, t(uid, "ask_channel"), reply_markup=cancel_keyboard(uid))
 
 # STEP 1: CHANNEL VERIFY
@@ -550,7 +549,7 @@ def wizard_step_photo(message):
     user_states[uid] = "step_options"
     bot.send_message(message.chat.id, t(uid, "ask_options"), reply_markup=cancel_keyboard(uid))
 
-# STEP 4: CANDIDATES (& SEPARATED) & FINAL SECURITY PREVIEW
+# STEP 4: CANDIDATES (& SEPARATED) & FINAL PREVIEW (NO PHOTO/USERNAME BLOCK)
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "step_options", content_types=["text"])
 def wizard_step_options(message):
     uid = message.from_user.id
@@ -561,52 +560,25 @@ def wizard_step_options(message):
 
     draft_polls[uid]["options"] = raw_names
     user_states[uid] = "step_final_preview"
-    send_final_preview(message.chat.id, uid)
 
-def build_final_preview_data(uid):
     d = draft_polls[uid]
     cands_list = "\n".join([f"👤 {idx+1}. {name}" for idx, name in enumerate(d["options"])])
     has_pic = "হ্যাঁ ✅" if d.get("photo_id") else "না"
     text = (
         f"📊 <b>পোলের ফাইনাল প্রিভিউ:</b>\n\n"
-        f"📣 <b>চ্যানেল:</b> {d['channel_username']}\n"
+        f"📣 <b>চ্যানেল:</b> {d['channel_title']} ({d['channel_username']})\n"
         f"❓ <b>প্রশ্ন:</b> {d['question']}\n"
         f"🖼 <b>ছবি যুক্ত:</b> {has_pic}\n\n"
         f"📝 <b>প্রার্থীসমূহ:</b>\n{cands_list}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛡 <b>পোলের নিরাপত্তা সেটিংস সেট করুন:</b>\n"
-        f"নিচের বাটনগুলোতে ক্লিক করে সিকিউরিটি অন/অফ করতে পারবেন।"
+        f"✅ <i>সবাই (ছবি বা ইউজারনেম ছাড়াও) এই পোলে ভোট দিতে পারবে।</i>"
     )
-    p_st = "🟢 ON" if d["photo_check"] else "🔴 OFF"
-    u_st = "🟢 ON" if d["username_check"] else "🔴 OFF"
-    f_st = "🟢 ON" if d["fake_check"] else "🔴 OFF"
-
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(
-        types.InlineKeyboardButton(f"🖼 Photo Check: {p_st}", callback_data="toggle_sec:photo_check"),
-        types.InlineKeyboardButton(f"🔰 Username Check: {u_st}", callback_data="toggle_sec:username_check"),
-        types.InlineKeyboardButton(f"🚫 New ID Filter (Fake): {f_st}", callback_data="toggle_sec:fake_check"),
         types.InlineKeyboardButton("🚀 Send to Channel", callback_data="publish_poll_now"),
         types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_draft")
     )
-    return text, markup
-
-def send_final_preview(chat_id, uid):
-    text, markup = build_final_preview_data(uid)
-    bot.send_message(chat_id, text, reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("toggle_sec:"))
-def cb_toggle_security(call):
-    uid = call.from_user.id
-    if uid not in draft_polls:
-        return
-    field = call.data.split(":")[1]
-    draft_polls[uid][field] = not draft_polls[uid][field]
-    text, markup = build_final_preview_data(uid)
-    try:
-        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
-    except Exception:
-        pass
+    bot.send_message(message.chat.id, text, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c: c.data == "cancel_draft")
 def cb_cancel_draft(call):
@@ -660,21 +632,19 @@ def cb_publish_poll(call):
     db["poll_counter"] += 1
     pid = str(db["poll_counter"])
 
+    creator_uname = f"@{call.from_user.username}" if call.from_user.username else "No Username"
     options_data = [{"name": name, "voters": []} for name in d["options"]]
     db["polls"][pid] = {
         "id": pid,
         "owner_id": uid,
         "owner_name": call.from_user.first_name,
-        "owner_username": f"@{call.from_user.username}" if call.from_user.username else "No Username",
+        "owner_username": creator_uname,
         "channel_id": d["channel_id"],
         "channel_username": d["channel_username"],
         "channel_title": d["channel_title"],
         "question": d["question"],
         "photo_id": d.get("photo_id"),
         "options": options_data,
-        "photo_check": d["photo_check"],
-        "username_check": d["username_check"],
-        "fake_check": d["fake_check"],
         "is_open": True,
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
     }
@@ -699,17 +669,23 @@ def cb_publish_poll(call):
 
     bot.send_message(call.message.chat.id, t(uid, "poll_sent"), reply_markup=main_menu_keyboard(uid))
 
-    # লগ চ্যানেলে নতুন পোল তৈরির রিপোর্ট
-    log_msg = (
-        f"🗳 <b>নতুন চ্যানেল পোল তৈরি হয়েছে! (#{pid})</b>\n"
+    # @optchannel6 এ বট নিজে থেকেই পোল ক্রিয়েটর ও চ্যানেলের সম্পূর্ণ তথ্য পাঠাবে
+    cands_str = ", ".join(d["options"])
+    auto_log = (
+        f"🆕 <b>নতুন ভোট/পোল তৈরি হয়েছে! (Poll #{pid})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📣 <b>চ্যানেল:</b> {d['channel_title']} ({d['channel_username']})\n"
-        f"❓ <b>প্রশ্ন:</b> {d['question']}\n"
-        f"👤 <b>ক্রিয়েটর:</b> {call.from_user.first_name} (<code>{uid}</code>)"
+        f"👤 <b>যিনি ভোট বানিয়েছেন:</b> {call.from_user.first_name}\n"
+        f"🔰 <b>ক্রিয়েটর ইউজারনেম:</b> {creator_uname}\n"
+        f"🆔 <b>ক্রিয়েটর আইডি:</b> <code>{uid}</code>\n"
+        f"📢 <b>যে চ্যানেলে বানানো হয়েছে:</b> {d['channel_title']}\n"
+        f"🔗 <b>চ্যানেল লিংক/ID:</b> {d['channel_username']} (<code>{d['channel_id']}</code>)\n"
+        f"❓ <b>পোলের প্রশ্ন:</b> {d['question']}\n"
+        f"📋 <b>প্রার্থীসমূহ:</b> {cands_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
     )
-    send_log_to_channel(log_msg)
+    send_log_to_channel(auto_log)
 
-# ================= LIVE VOTING, WITHDRAW & CLOSE =================
+# ================= LIVE VOTING (OPEN FOR EVERYONE), WITHDRAW & CLOSE =================
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pclosed:"))
 def cb_poll_closed(call):
     bot.answer_callback_query(call.id, "🛑 এই পোলটি বন্ধ হয়ে গেছে!", show_alert=True)
@@ -729,25 +705,7 @@ def cb_cast_poll_vote(call):
         bot.answer_callback_query(call.id, "🛑 পোলটি বন্ধ হয়ে গেছে!", show_alert=True)
         return
 
-    # সিকিউরিটি চেকসমূহ
-    if poll.get("username_check") and not voter.username:
-        bot.answer_callback_query(call.id, "⚠️ ভোট দিতে আপনার টেলিগ্রাম অ্যাকাউন্টে অবশ্যই Username থাকতে হবে!", show_alert=True)
-        return
-
-    if poll.get("fake_check") and vid > 8800000000:
-        bot.answer_callback_query(call.id, "🚫 নতুন/ফেক আইডি থেকে ভোট গ্রহণ বন্ধ আছে!", show_alert=True)
-        return
-
-    if poll.get("photo_check"):
-        try:
-            photos = bot.get_user_profile_photos(vid, limit=1)
-            if photos.total_count == 0:
-                bot.answer_callback_query(call.id, "🖼 ভোট দিতে আপনার প্রোফাইলে অবশ্যই ছবি থাকতে হবে!", show_alert=True)
-                return
-        except Exception:
-            pass
-
-    # চ্যানেলে জয়েন আছে কি না চেক
+    # চ্যানেলে জয়েন আছে কি না চেক (ছবি বা ইউজারনেম ছাড়াই সবাই ভোট দিতে পারবে)
     try:
         ch_member = bot.get_chat_member(poll["channel_id"], vid)
         if ch_member.status in ["left", "kicked"]:
@@ -756,7 +714,7 @@ def cb_cast_poll_vote(call):
     except Exception:
         pass
 
-    # আগে ভোট দিয়েছে কি না চেক
+    # ডাবল ভোট প্রতিরোধ
     for o in poll["options"]:
         if vid in o["voters"]:
             bot.answer_callback_query(call.id, "⚠️ আপনি ইতোমধ্যে ভোট দিয়েছেন! পরিবর্তন করতে আগে 'ভোট প্রত্যাহার করুন' চাপুন।", show_alert=True)
@@ -767,6 +725,7 @@ def cb_cast_poll_vote(call):
 
     chosen_name = poll["options"][opt_idx]["name"]
     cand_total = len(poll["options"][opt_idx]["voters"])
+    poll_total = sum(len(o["voters"]) for o in poll["options"])
     bot.answer_callback_query(call.id, f"✅ আপনার ভোট '{chosen_name}'-কে যুক্ত হয়েছে!", show_alert=True)
 
     # চ্যানেল পোস্ট লাইভ আপডেট
@@ -780,9 +739,9 @@ def cb_cast_poll_vote(call):
     except Exception:
         pass
 
-    # পোল ক্রিয়েটর ও লগ চ্যানেলে স্ক্রিনশটের মতো লাইভ রিপোর্ট পাঠানো
+    # পোল ক্রিয়েটরকে ইনবক্সে নোটিফিকেশন
     uname = f"@{voter.username}" if voter.username else "No Username"
-    track_msg = (
+    creator_notify = (
         f"👷 <b>ভোট দিয়েছেন:</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 <b>নাম :</b> {voter.first_name}\n"
@@ -792,10 +751,24 @@ def cb_cast_poll_vote(call):
         f"━━━━━━━━━━━━━━━━━━━━"
     )
     try:
-        bot.send_message(poll["owner_id"], track_msg)
+        bot.send_message(poll["owner_id"], creator_notify)
     except Exception:
         pass
-    send_log_to_channel(f"📣 <b>চ্যানেল:</b> {poll['channel_username']} (#{pid})\n{track_msg}")
+
+    # @optchannel6 চ্যানেলে কে কয়টা ভোট নিচ্ছে ও কোন চ্যানেলে হচ্ছে তার সম্পূর্ণ হিসাব
+    breakdown = "\n".join([f"   • {o['name']}: <b>{len(o['voters'])}</b> ভোট" for o in poll["options"]])
+    channel_report = (
+        f"📊 <b>লাইভ ভোট আপডেট (Poll #{pid})</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📢 <b>চ্যানেল:</b> {poll['channel_title']} ({poll['channel_username']})\n"
+        f"👑 <b>পোল ক্রিয়েটর:</b> {poll['owner_name']} (<code>{poll['owner_id']}</code>)\n"
+        f"🙋‍♂️ <b>ভোটার:</b> {voter.first_name} ({uname} | <code>{vid}</code>)\n"
+        f"📌 <b>ভোট পেয়েছেন:</b> {chosen_name}\n\n"
+        f"📈 <b>বর্তমান ভোটের হিসাব (মোট {poll_total} ভোট):</b>\n"
+        f"{breakdown}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    send_log_to_channel(channel_report)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pwithdraw:"))
 def cb_withdraw_vote(call):
@@ -879,7 +852,7 @@ def menu_edit_polls(message):
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("edittoggle:"))
 def cb_edit_toggle(call):
-    pid = c.data.split(":")[1] if hasattr(c := call, "data") else ""
+    pid = call.data.split(":")[1]
     poll = db["polls"].get(pid)
     if not poll:
         return
@@ -943,7 +916,7 @@ def cmd_setlog(message):
         return
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        bot.reply_to(message, "ব্যবহার: <code>/setlog @channelusername</code>")
+        bot.reply_to(message, "ব্যবহার: <code>/setlog @optchannel6</code>")
         return
     db["log_channel"] = parts[1].strip()
     save_db(db)
@@ -979,7 +952,7 @@ def cb_admin(call):
             f"👑 VIP Users: <code>{len(db['vip_users'])}</code>\n"
             f"🗳 Total Polls: <code>{total_p}</code>\n"
             f"❤️ Total Votes: <code>{total_v}</code>\n"
-            f"📢 Log Channel: <code>{db.get('log_channel') or 'Not Set'}</code>"
+            f"📢 Log Channel: <code>{db.get('log_channel') or DEFAULT_LOG_CHANNEL}</code>"
         )
     elif act == "users":
         lines = ["👥 <b>Recent Users & Referrals:</b>\n"]
@@ -994,7 +967,7 @@ def cb_admin(call):
         lines = ["🗳 <b>All Channel Polls:</b>\n"]
         for p in list(db["polls"].values())[-15:]:
             tv = sum(len(o["voters"]) for o in p["options"])
-            lines.append(f"🆔 <b>#{p['id']}</b> | Ch: {p['channel_username']} | By: <code>{p['owner_id']}</code> | Votes: <b>{tv}</b>")
+            lines.append(f"🆔 <b>#{p['id']}</b> | Ch: {p['channel_username']} | By: {p['owner_name']} (<code>{p['owner_id']}</code>) | Votes: <b>{tv}</b>")
         bot.send_message(ADMIN_ID, "\n".join(lines))
     elif act == "add_vip":
         user_states[ADMIN_ID] = "adm_vip"
