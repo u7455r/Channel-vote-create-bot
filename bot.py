@@ -70,7 +70,7 @@ TEXTS = {
         "still_locked_alert": "❌ আপনার এখনো ১টি রেফার পূর্ণ হয়নি! আপনার লিংকটি বন্ধুদের শেয়ার করুন।",
         "welcome": (
             "👋 আসসালামু আলাইকুম <b>{name}</b>!\n\n"
-            "🏆 <b>Channel Voting & Contest Maker Bot</b>-এ আপনাকে স্বাগতম।\n"
+            "🏆 <b>Channel Vote Maker</b>-এ আপনাকে স্বাগতম।\n"
             "আপনার অ্যাকাউন্ট সম্পূর্ণ <b>আনলকড 🔓</b>। নিচের মেনু ব্যবহার করে আপনার চ্যানেলের জন্য লাইভ ভোটিং পোস্ট তৈরি করুন!\n\n"
             "👥 <b>মোট রেফার:</b> {refs} জন"
         ),
@@ -141,7 +141,7 @@ TEXTS = {
         "still_locked_alert": "❌ You still have 0 referrals! Share your referral link with a friend first.",
         "welcome": (
             "👋 Welcome <b>{name}</b>!\n\n"
-            "🏆 Welcome to <b>Channel Voting & Contest Maker Bot</b>.\n"
+            "🏆 Welcome to <b>Channel Vote Maker</b>.\n"
             "Your account is <b>Unlocked 🔓</b>. Use the menu below to create live voting polls for your channel!\n\n"
             "👥 <b>Total Referrals:</b> {refs}"
         ),
@@ -572,12 +572,14 @@ def build_campaign_markup(user_id, cid):
     camp = db["campaigns"][cid]
     vote_count = len(camp["voters"])
     is_open = camp.get("is_open", True)
+    bot_username = bot.get_me().username
+    vote_link = f"https://t.me/{bot_username}?start=vote_{cid}"
 
     markup = types.InlineKeyboardMarkup(row_width=1)
     if is_open:
         markup.add(
             types.InlineKeyboardButton(t(user_id, "vote_btn").format(count=vote_count), callback_data=f"cast_vote:{cid}"),
-            types.InlineKeyboardButton(t(user_id, "share_btn"), switch_inline_query=f"vote_{cid}")
+            types.InlineKeyboardButton(t(user_id, "share_btn"), url=f"https://t.me/share/url?url={vote_link}")
         )
     else:
         markup.add(
@@ -953,7 +955,7 @@ RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 
 @app.route("/")
 def home():
-    return "Rafim Ultimate Voting & Contest Bot is Running 24/7 via Webhook!"
+    return "Channel Vote Maker Bot is Running 24/7 via Webhook!"
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
