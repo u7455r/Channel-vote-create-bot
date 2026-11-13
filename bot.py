@@ -12,6 +12,7 @@ ADMIN_ID = int(os.environ.get("ADMIN_ID", "8298133943"))
 ADMIN_USERNAME = "@rafimhossen"
 BOT_USERNAME = "Votemaker5bot"
 DEFAULT_LOG_CHANNEL = "@optchannel6"
+PROMO_CHANNEL = "@bdgiveaways24"
 
 REQUIRED_CHATS = [
     {"username": "@optchannel6", "url": "https://t.me/optchannel6", "name": "Opt Channel 6"},
@@ -108,8 +109,7 @@ TEXTS = {
             "➡️ বাঁকা লিখতে হলে: <code>&lt;i&gt;আপনার লেখা&lt;/i&gt;</code>\n"
             "➡️ কোডের মতো লিখতে: <code>&lt;code&gt;আপনার লেখা&lt;/code&gt;</code>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "✅ <b>এখন আপনার প্রশ্ন পাঠান:</b>\n"
-            "💡 <i>ট্যাগ কপি করতে উপরের টেক্সট সিলেক্ট করে কপি করুন</i>"
+            "✅ <b>এখন আপনার প্রশ্ন পাঠান:</b>"
         ),
         "question_preview": (
             "📝 <b>আপনার পোলের প্রশ্নের প্রিভিউ:</b>\n\n"
@@ -133,7 +133,7 @@ TEXTS = {
             "━━━━━━━━━━━━━━━━━━━━\n"
             "ℹ️ <b>নোট:</b>\n"
             "• সর্বোচ্চ ৩০ জনের নাম দিতে পারবেন\n"
-            "• পরে আরো নাম যোগ করতে পোল এডিট মেনু ব্যবহার করুন"
+            "• পরে নাম যোগ বা বাদ দিতে পোল এডিট মেনু ব্যবহার করুন"
         ),
         "invalid_options": "❌ কমপক্ষে ১ জন এবং সর্বোচ্চ ৩০ জন প্রার্থীর নাম <code>&amp;</code> চিহ্ন দিয়ে লিখুন!",
         "poll_sent": "🚀 <b>আপনার চ্যানেলে পোল পাঠানো হয়েছে।</b>\n\n🗳 পোলটি স্বয়ংক্রিয়ভাবে ট্র্যাক করা হচ্ছে।",
@@ -314,6 +314,62 @@ def send_log_to_channel(text):
         except Exception as e:
             print("Log error:", e)
 
+def make_progress_bar(count, total):
+    if total <= 0:
+        return "░░░░░░░░ 0%"
+    pct = round((count / total) * 100)
+    filled = round((pct / 100) * 8)
+    bar = "▓" * filled + "░" * (8 - filled)
+    return f"{bar} {pct}%"
+
+def build_channel_poll_caption(poll_id):
+    poll = db["polls"][poll_id]
+    total_votes = sum(len(o["voters"]) for o in poll["options"])
+
+    stats_lines = []
+    for o in poll["options"]:
+        cnt = len(o["voters"])
+        p_bar = make_progress_bar(cnt, total_votes)
+        stats_lines.append(f"▫️ <b>{o['name']}</b> — <code>{cnt}</code>\n   <code>{p_bar}</code>")
+    stats_block = "\n".join(stats_lines)
+
+    timer_info = ""
+    if poll.get("close_at") and poll.get("is_open", True):
+        rem_sec = int(poll["close_at"] - time.time())
+        if rem_sec > 0:
+            hrs = rem_sec // 3600
+            mins = (rem_sec % 3600) // 60
+            timer_info = f"\n⏳ <b>Time Left:</b> {hrs}h {mins}m"
+
+    return (
+        f"🗳 <b>{poll['question']}</b>\n\n"
+        f"{stats_block}\n\n"
+        f"📈 <b>Total Votes:</b> <code>{total_votes}</code>{timer_info}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚡ Poll Create :- @{BOT_USERNAME}\n"
+        f"📢 Join :- {PROMO_CHANNEL}"
+    )
+
+def build_channel_poll_markup(poll_id):
+    poll = db["polls"][poll_id]
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    is_open = poll.get("is_open", True)
+
+    for idx, opt in enumerate(poll["options"]):
+        v_count = len(opt["voters"])
+        btn_text = f"🗳 {v_count} | 🔥 {opt['name']}" if is_open else f"🔒 {v_count} | {opt['name']}"
+        cb = f"pvote:{poll_id}:{idx}" if is_open else f"pclosed:{poll_id}"
+        markup.add(types.InlineKeyboardButton(btn_text, callback_data=cb))
+
+    if is_open:
+        markup.row(
+            types.InlineKeyboardButton("🔄 ভোট প্রত্যাহার করুন", callback_data=f"pwithdraw:{poll_id}"),
+            types.InlineKeyboardButton("🛑 পোল বন্ধ করুন", callback_data=f"pclose:{poll_id}")
+        )
+    else:
+        markup.add(types.InlineKeyboardButton("🔒 পোলটি বন্ধ করা হয়েছে", callback_data=f"pclosed:{poll_id}"))
+    return markup
+
 def refresh_channel_poll_message(pid):
     poll = db["polls"].get(pid)
     if not poll or not poll.get("message_id"):
@@ -329,6 +385,50 @@ def refresh_channel_poll_message(pid):
             bot.edit_message_text(caption, poll["channel_id"], poll["message_id"], reply_markup=markup)
     except Exception as e:
         print("Refresh channel message error:", e)
+
+def announce_poll_winner(pid, auto_closed=False):
+    poll = db["polls"].get(pid)
+    if not poll:
+        return
+    poll["is_open"] = False
+    poll["close_at"] = None
+    save_db(db)
+    refresh_channel_poll_message(pid)
+
+    sorted_opts = sorted(poll["options"], key=lambda x: len(x["voters"]), reverse=True)
+    winner = sorted_opts[0] if sorted_opts else {"name": "N/A", "voters": []}
+    total_v = sum(len(o["voters"]) for o in poll["options"])
+    standings = "\n".join([f"{idx+1}. <b>{o['name']}</b> — <code>{len(o['voters'])}</code> ভোট" for idx, o in enumerate(sorted_opts)])
+    reason_tag = "⏰ নির্ধারিত সময় শেষ (Auto-Closed)" if auto_closed else "🛑 ভোটিং সমাপ্ত"
+
+    win_msg = (
+        f"🏆🎉 <b>FINAL POLL RESULT (#{pid})</b> 🎉🏆\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"❓ <b>প্রশ্ন:</b> {poll['question']}\n\n"
+        f"👑 <b>বিজয়ী (Winner):</b> 🔥 <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)\n\n"
+        f"📊 <b>চূড়ান্ত ফলাফল (মোট {total_v} ভোট):</b>\n"
+        f"{standings}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{reason_tag}"
+    )
+    try:
+        bot.send_message(poll["channel_id"], win_msg)
+    except Exception:
+        pass
+    send_log_to_channel(f"🏁 <b>পোল #{pid} সমাপ্ত হয়েছে!</b> ({poll['channel_username']})\n👑 বিজয়ী: <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)")
+
+# ================= AUTO-TIMER BACKGROUND WORKER =================
+def auto_close_watcher():
+    while True:
+        try:
+            now = time.time()
+            for pid, poll in list(db.get("polls", {}).items()):
+                close_ts = poll.get("close_at")
+                if poll.get("is_open", True) and close_ts and now >= close_ts:
+                    announce_poll_winner(pid, auto_closed=True)
+        except Exception as e:
+            print("Auto-timer watcher error:", e)
+        time.sleep(20)
 
 def register_user(user, ref_by=None):
     uid = str(user.id)
@@ -392,15 +492,40 @@ def passes_gate(message):
         return False
     return True
 
-# ================= START & LANGUAGE =================
+# ================= START, DEEP-LINK DIRECT VOTE & LANGUAGE =================
 @bot.message_handler(commands=["start"])
 def handle_start(message):
     user_states.pop(message.from_user.id, None)
     draft_polls.pop(message.from_user.id, None)
     args = message.text.split()
     payload = args[1] if len(args) > 1 else ""
-    ref_by = payload.replace("ref_", "") if payload.startswith("ref_") else None
 
+    # ডিরেক্ট ক্যান্ডিডেট ভোট লিংক হ্যান্ডলার (?start=v_101_0)
+    if payload.startswith("v_"):
+        register_user(message.from_user)
+        parts = payload.split("_")
+        if len(parts) == 3 and parts[1] in db["polls"] and parts[2].isdigit():
+            pid = parts[1]
+            opt_idx = int(parts[2])
+            poll = db["polls"][pid]
+            if 0 <= opt_idx < len(poll["options"]):
+                cand_name = poll["options"][opt_idx]["name"]
+                markup = types.InlineKeyboardMarkup(row_width=1)
+                markup.add(
+                    types.InlineKeyboardButton(f"✅ হ্যাঁ, {cand_name}-কে ভোট দিন", callback_data=f"directvote:{pid}:{opt_idx}"),
+                    types.InlineKeyboardButton("📢 চ্যানেল দেখুন", url=f"https://t.me/{poll['channel_username'].lstrip('@')}")
+                )
+                bot.send_message(
+                    message.chat.id,
+                    f"🗳 <b>ডিরেক্ট ভোট কনফার্মেশন (#{pid})</b>\n\n"
+                    f"❓ <b>প্রশ্ন:</b> {poll['question']}\n"
+                    f"🔥 <b>প্রার্থী:</b> <b>{cand_name}</b>\n\n"
+                    f"👇 ভোট নিশ্চিত করতে নিচের বাটনে চাপুন:",
+                    reply_markup=markup
+                )
+                return
+
+    ref_by = payload.replace("ref_", "") if payload.startswith("ref_") else None
     is_new = register_user(message.from_user, ref_by=ref_by)
     if is_new and not is_vip(message.from_user.id):
         markup = types.InlineKeyboardMarkup(row_width=2)
@@ -411,6 +536,12 @@ def handle_start(message):
         bot.send_message(message.chat.id, TEXTS["bn"]["choose_lang"], reply_markup=markup)
         return
     send_dashboard(message.chat.id, message.from_user)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("directvote:"))
+def cb_direct_candidate_vote(call):
+    parts = call.data.split(":")
+    pid, opt_idx = parts[1], int(parts[2])
+    process_vote_action(call, pid, opt_idx, from_direct=True)
 
 @bot.callback_query_handler(func=lambda c: c.data == "open_lang")
 def cb_open_lang(call):
@@ -494,7 +625,7 @@ def menu_refer(message):
     refs = db["users"][uid]["referrals"]
     bot.send_message(message.chat.id, f"🔗 <b>রেফারেল লিংক:</b>\n<code>{ref_link}</code>\n\n👥 <b>মোট রেফার:</b> {refs} জন")
 
-# ================= POLL CREATION WIZARD (STRICT ADMIN/OWNER CHECK) =================
+# ================= POLL CREATION WIZARD (WITH TIMER & ADMIN CHECK) =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_create"], TEXTS["en"]["btn_create"]])
 def menu_create_poll(message):
     if not passes_gate(message):
@@ -509,7 +640,7 @@ def cb_start_wizard(call):
         return
     uid = call.from_user.id
     user_states[uid] = "step_channel"
-    draft_polls[uid] = {}
+    draft_polls[uid] = {"timer_hours": 0}
     bot.send_message(call.message.chat.id, t(uid, "ask_channel"), reply_markup=cancel_keyboard(uid))
 
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "step_channel", content_types=["text"])
@@ -523,13 +654,11 @@ def wizard_step_channel(message):
         bot_id = bot.get_me().id
         chat = bot.get_chat(target)
 
-        # ১ম চেক: বট ওই চ্যানেল/গ্রুপের Admin কি না
         bot_member = bot.get_chat_member(chat.id, bot_id)
         if bot_member.status not in ["administrator", "creator"]:
             bot.send_message(message.chat.id, t(uid, "not_bot_admin"), reply_markup=cancel_keyboard(uid))
             return
 
-        # ২য় চেক: যিনি ভোট বানাচ্ছেন তিনি নিজে ওই চ্যানেল/গ্রুপের Admin বা Owner কি না
         user_member = bot.get_chat_member(chat.id, uid)
         if user_member.status not in ["administrator", "creator"] and uid != ADMIN_ID:
             bot.send_message(message.chat.id, t(uid, "not_user_admin"), reply_markup=cancel_keyboard(uid))
@@ -542,7 +671,7 @@ def wizard_step_channel(message):
         user_states[uid] = "step_question"
         bot.send_message(
             message.chat.id,
-            f"✅ <b>ভেরিফাই সফল!</b> ({chat.title or target} — আপনার পদবী: <b>{user_member.status.upper()}</b>)\n\n" + t(uid, "ask_question"),
+            f"✅ <b>ভেরিফাই সফল!</b> ({chat.title or target} — পদবী: <b>{user_member.status.upper()}</b>)\n\n" + t(uid, "ask_question"),
             reply_markup=cancel_keyboard(uid)
         )
     except Exception:
@@ -587,6 +716,35 @@ def wizard_step_photo(message):
     user_states[uid] = "step_options"
     bot.send_message(message.chat.id, t(uid, "ask_options"), reply_markup=cancel_keyboard(uid))
 
+def build_draft_preview(uid):
+    d = draft_polls[uid]
+    cands_list = "\n".join([f"👤 {idx+1}. {name}" for idx, name in enumerate(d["options"])])
+    has_pic = "হ্যাঁ ✅" if d.get("photo_id") else "না"
+    hrs = d.get("timer_hours", 0)
+    timer_label = f"{hrs} ঘণ্টা পর অটো বন্ধ হবে" if hrs > 0 else "Manual (ম্যানুয়াল বন্ধ)"
+
+    text = (
+        f"📊 <b>পোলের ফাইনাল প্রিভিউ:</b>\n\n"
+        f"📣 <b>চ্যানেল:</b> {d['channel_title']} ({d['channel_username']})\n"
+        f"❓ <b>প্রশ্ন:</b> {d['question']}\n"
+        f"🖼 <b>ছবি যুক্ত:</b> {has_pic}\n"
+        f"⏳ <b>অটো টাইমার:</b> {timer_label}\n\n"
+        f"📝 <b>প্রার্থীসমূহ:</b>\n{cands_list}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏱ <i>নিচের বাটন থেকে অটো-ক্লোজ টাইমার সেট করতে পারেন:</i>"
+    )
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        types.InlineKeyboardButton("⏳ 1h", callback_data="settimer:1"),
+        types.InlineKeyboardButton("⏳ 6h", callback_data="settimer:6"),
+        types.InlineKeyboardButton("⏳ 12h", callback_data="settimer:12"),
+        types.InlineKeyboardButton("⏳ 24h", callback_data="settimer:24"),
+        types.InlineKeyboardButton("♾ Manual", callback_data="settimer:0")
+    )
+    markup.add(types.InlineKeyboardButton("🚀 Send to Channel", callback_data="publish_poll_now"))
+    markup.add(types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_draft"))
+    return text, markup
+
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "step_options", content_types=["text"])
 def wizard_step_options(message):
     uid = message.from_user.id
@@ -597,25 +755,21 @@ def wizard_step_options(message):
 
     draft_polls[uid]["options"] = raw_names
     user_states[uid] = "step_final_preview"
-
-    d = draft_polls[uid]
-    cands_list = "\n".join([f"👤 {idx+1}. {name}" for idx, name in enumerate(d["options"])])
-    has_pic = "হ্যাঁ ✅" if d.get("photo_id") else "না"
-    text = (
-        f"📊 <b>পোলের ফাইনাল প্রিভিউ:</b>\n\n"
-        f"📣 <b>চ্যানেল:</b> {d['channel_title']} ({d['channel_username']})\n"
-        f"❓ <b>প্রশ্ন:</b> {d['question']}\n"
-        f"🖼 <b>ছবি যুক্ত:</b> {has_pic}\n\n"
-        f"📝 <b>প্রার্থীসমূহ:</b>\n{cands_list}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ <i>সবাই (ছবি বা ইউজারনেম ছাড়াও) এই পোলে ভোট দিতে পারবে।</i>"
-    )
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton("🚀 Send to Channel", callback_data="publish_poll_now"),
-        types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_draft")
-    )
+    text, markup = build_draft_preview(uid)
     bot.send_message(message.chat.id, text, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("settimer:"))
+def cb_set_draft_timer(call):
+    uid = call.from_user.id
+    if uid not in draft_polls:
+        return
+    hrs = int(call.data.split(":")[1])
+    draft_polls[uid]["timer_hours"] = hrs
+    text, markup = build_draft_preview(uid)
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+    except Exception:
+        pass
 
 @bot.callback_query_handler(func=lambda c: c.data == "cancel_draft")
 def cb_cancel_draft(call):
@@ -629,35 +783,6 @@ def cb_cancel_draft(call):
     bot.send_message(call.message.chat.id, t(uid, "cancelled"), reply_markup=main_menu_keyboard(uid))
 
 # ================= PUBLISH POLL TO CHANNEL =================
-def build_channel_poll_markup(poll_id):
-    poll = db["polls"][poll_id]
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    is_open = poll.get("is_open", True)
-
-    for idx, opt in enumerate(poll["options"]):
-        v_count = len(opt["voters"])
-        btn_text = f"🗳 {v_count} | 🔥 {opt['name']}" if is_open else f"🔒 {v_count} | {opt['name']}"
-        cb = f"pvote:{poll_id}:{idx}" if is_open else f"pclosed:{poll_id}"
-        markup.add(types.InlineKeyboardButton(btn_text, callback_data=cb))
-
-    if is_open:
-        markup.row(
-            types.InlineKeyboardButton("🔄 ভোট প্রত্যাহার করুন", callback_data=f"pwithdraw:{poll_id}"),
-            types.InlineKeyboardButton("🛑 পোল বন্ধ করুন", callback_data=f"pclose:{poll_id}")
-        )
-    else:
-        markup.add(types.InlineKeyboardButton("🔒 পোলটি বন্ধ করা হয়েছে", callback_data=f"pclosed:{poll_id}"))
-    return markup
-
-def build_channel_poll_caption(poll_id):
-    poll = db["polls"][poll_id]
-    total_votes = sum(len(o["voters"]) for o in poll["options"])
-    return (
-        f"🗳 <b>{poll['question']}</b>\n\n"
-        f"📈 Total Votes: <b>{total_votes}</b>\n\n"
-        f"⚡ Poll Create :- @{BOT_USERNAME}"
-    )
-
 @bot.callback_query_handler(func=lambda c: c.data == "publish_poll_now")
 def cb_publish_poll(call):
     uid = call.from_user.id
@@ -668,6 +793,9 @@ def cb_publish_poll(call):
 
     db["poll_counter"] += 1
     pid = str(db["poll_counter"])
+
+    hrs = d.get("timer_hours", 0)
+    close_at = (time.time() + hrs * 3600) if hrs > 0 else None
 
     creator_uname = f"@{call.from_user.username}" if call.from_user.username else "No Username"
     options_data = [{"name": name, "voters": []} for name in d["options"]]
@@ -683,6 +811,7 @@ def cb_publish_poll(call):
         "photo_id": d.get("photo_id"),
         "options": options_data,
         "message_id": None,
+        "close_at": close_at,
         "is_open": True,
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
     }
@@ -708,7 +837,17 @@ def cb_publish_poll(call):
     except Exception:
         pass
 
-    bot.send_message(call.message.chat.id, t(uid, "poll_sent"), reply_markup=main_menu_keyboard(uid))
+    # ক্রিয়েটরকে ডিরেক্ট ক্যান্ডিডেট ভোট লিংকসহ মেসেজ পাঠানো
+    direct_links_list = "\n".join([
+        f"🔥 <b>{o['name']}:</b> <code>https://t.me/{BOT_USERNAME}?start=v_{pid}_{idx}</code>"
+        for idx, o in enumerate(options_data)
+    ])
+    bot.send_message(
+        call.message.chat.id,
+        f"{t(uid, 'poll_sent')}\n\n"
+        f"🔗 <b>প্রতিযোগীদের পার্সোনাল ডিরেক্ট ভোট লিংক (শেয়ার করার জন্য):</b>\n{direct_links_list}",
+        reply_markup=main_menu_keyboard(uid)
+    )
 
     cands_str = ", ".join(d["options"])
     auto_log = (
@@ -726,14 +865,7 @@ def cb_publish_poll(call):
     send_log_to_channel(auto_log)
 
 # ================= LIVE VOTING, WITHDRAW & CLOSE =================
-@bot.callback_query_handler(func=lambda c: c.data.startswith("pclosed:"))
-def cb_poll_closed(call):
-    bot.answer_callback_query(call.id, "🛑 এই পোলটি বন্ধ হয়ে গেছে!", show_alert=True)
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("pvote:"))
-def cb_cast_poll_vote(call):
-    parts = call.data.split(":")
-    pid, opt_idx = parts[1], int(parts[2])
+def process_vote_action(call, pid, opt_idx, from_direct=False):
     voter = call.from_user
     vid = voter.id
 
@@ -755,11 +887,12 @@ def cb_cast_poll_vote(call):
 
     for o in poll["options"]:
         if vid in o["voters"]:
-            bot.answer_callback_query(call.id, "⚠️ আপনি ইতোমধ্যে ভোট দিয়েছেন! পরিবর্তন করতে আগে 'ভোট প্রত্যাহার করুন' চাপুন।", show_alert=True)
+            bot.answer_callback_query(call.id, "⚠️ আপনি ইতোমধ্যে ভোট দিয়েছেন! পরিবর্তন করতে চ্যানেলের পোস্টে 'ভোট প্রত্যাহার করুন' চাপুন।", show_alert=True)
             return
 
     poll["options"][opt_idx]["voters"].append(vid)
-    poll["message_id"] = call.message.message_id
+    if not from_direct:
+        poll["message_id"] = call.message.message_id
     save_db(db)
 
     chosen_name = poll["options"][opt_idx]["name"]
@@ -767,15 +900,7 @@ def cb_cast_poll_vote(call):
     poll_total = sum(len(o["voters"]) for o in poll["options"])
     bot.answer_callback_query(call.id, f"✅ আপনার ভোট '{chosen_name}'-কে যুক্ত হয়েছে!", show_alert=True)
 
-    caption = build_channel_poll_caption(pid)
-    markup = build_channel_poll_markup(pid)
-    try:
-        if poll.get("photo_id"):
-            bot.edit_message_caption(caption, call.message.chat.id, call.message.message_id, reply_markup=markup)
-        else:
-            bot.edit_message_text(caption, call.message.chat.id, call.message.message_id, reply_markup=markup)
-    except Exception:
-        pass
+    refresh_channel_poll_message(pid)
 
     uname = f"@{voter.username}" if voter.username else "No Username"
     creator_notify = (
@@ -806,6 +931,16 @@ def cb_cast_poll_vote(call):
     )
     send_log_to_channel(channel_report)
 
+@bot.callback_query_handler(func=lambda c: c.data.startswith("pclosed:"))
+def cb_poll_closed(call):
+    bot.answer_callback_query(call.id, "🛑 এই পোলটি বন্ধ হয়ে গেছে!", show_alert=True)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("pvote:"))
+def cb_cast_poll_vote(call):
+    parts = call.data.split(":")
+    pid, opt_idx = parts[1], int(parts[2])
+    process_vote_action(call, pid, opt_idx, from_direct=False)
+
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pwithdraw:"))
 def cb_withdraw_vote(call):
     pid = call.data.split(":")[1]
@@ -827,16 +962,7 @@ def cb_withdraw_vote(call):
 
     save_db(db)
     bot.answer_callback_query(call.id, f"🔄 '{removed_from}' থেকে আপনার ভোট প্রত্যাহার করা হয়েছে!", show_alert=True)
-
-    caption = build_channel_poll_caption(pid)
-    markup = build_channel_poll_markup(pid)
-    try:
-        if poll.get("photo_id"):
-            bot.edit_message_caption(caption, call.message.chat.id, call.message.message_id, reply_markup=markup)
-        else:
-            bot.edit_message_text(caption, call.message.chat.id, call.message.message_id, reply_markup=markup)
-    except Exception:
-        pass
+    refresh_channel_poll_message(pid)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pclose:"))
 def cb_close_poll_from_channel(call):
@@ -849,20 +975,12 @@ def cb_close_poll_from_channel(call):
         return
 
     poll["is_open"] = False
+    poll["close_at"] = None
     save_db(db)
     bot.answer_callback_query(call.id, "🛑 পোলটি বন্ধ করে দেওয়া হয়েছে!", show_alert=True)
+    refresh_channel_poll_message(pid)
 
-    caption = build_channel_poll_caption(pid) + "\n\n🛑 <b>[VOTING CLOSED]</b>"
-    markup = build_channel_poll_markup(pid)
-    try:
-        if poll.get("photo_id"):
-            bot.edit_message_caption(caption, call.message.chat.id, call.message.message_id, reply_markup=markup)
-        else:
-            bot.edit_message_text(caption, call.message.chat.id, call.message.message_id, reply_markup=markup)
-    except Exception:
-        pass
-
-# ================= FULL EDIT POLLS MENU (ADD NAME, EDIT QUESTION, WINNER, CLOSE, DELETE) =================
+# ================= FULL EDIT POLLS MENU (ADD, REMOVE, QUESTION, WINNER, CLOSE, DELETE) =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS["bn"]["btn_edit"], TEXTS["en"]["btn_edit"]])
 def menu_edit_polls(message):
     if not passes_gate(message):
@@ -886,14 +1004,15 @@ def menu_edit_polls(message):
         )
         btn_txt = f"🛑 বন্ধ #{p['id']}" if p.get("is_open", True) else f"🟢 চালু #{p['id']}"
         markup.add(
-            types.InlineKeyboardButton(f"➕ নতুন নাম যোগ #{p['id']}", callback_data=f"editadd:{p['id']}"),
-            types.InlineKeyboardButton(f"📝 প্রশ্ন এডিট #{p['id']}", callback_data=f"editq:{p['id']}")
+            types.InlineKeyboardButton(f"➕ নাম যোগ #{p['id']}", callback_data=f"editadd:{p['id']}"),
+            types.InlineKeyboardButton(f"➖ নাম বাদ #{p['id']}", callback_data=f"editrem:{p['id']}")
         )
         markup.add(
-            types.InlineKeyboardButton(f"🏆 উইনার ঘোষণা #{p['id']}", callback_data=f"editwin:{p['id']}"),
-            types.InlineKeyboardButton(btn_txt, callback_data=f"edittoggle:{p['id']}")
+            types.InlineKeyboardButton(f"📝 প্রশ্ন এডিট #{p['id']}", callback_data=f"editq:{p['id']}"),
+            types.InlineKeyboardButton(f"🏆 উইনার ঘোষণা #{p['id']}", callback_data=f"editwin:{p['id']}")
         )
         markup.add(
+            types.InlineKeyboardButton(btn_txt, callback_data=f"edittoggle:{p['id']}"),
             types.InlineKeyboardButton(f"🗑 ডিলিট #{p['id']}", callback_data=f"editdel:{p['id']}")
         )
     bot.send_message(message.chat.id, "\n".join(lines), reply_markup=markup)
@@ -902,16 +1021,14 @@ def menu_edit_polls(message):
 def cb_edit_add_candidate(call):
     pid = call.data.split(":")[1]
     poll = db["polls"].get(pid)
-    if not poll:
-        return
-    if call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID:
+    if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
         return
     uid = call.from_user.id
     user_states[uid] = f"adding_cand:{pid}"
     bot.send_message(
         call.message.chat.id,
         f"➕ <b>পোল #{pid}-এ নতুন প্রার্থীর নাম যোগ করুন:</b>\n\n"
-        f"একজন বা একাধিক নাম যোগ করতে চাইলে মাঝে <code>&amp;</code> দিয়ে লিখুন (যেমন: <code>নতুন নাম১&amp;নতুন নাম২</code>):",
+        f"একজন বা একাধিক নাম যোগ করতে চাইলে মাঝে <code>&amp;</code> দিয়ে লিখুন:",
         reply_markup=cancel_keyboard(uid)
     )
 
@@ -927,7 +1044,6 @@ def process_add_candidate(message):
     if not new_names:
         bot.send_message(message.chat.id, "❌ সঠিক নাম লিখুন!", reply_markup=main_menu_keyboard(uid))
         return
-
     if len(poll["options"]) + len(new_names) > 30:
         bot.send_message(message.chat.id, "❌ একটি পোলে সর্বোচ্চ ৩০ জনের বেশি প্রার্থী রাখা যাবে না!", reply_markup=main_menu_keyboard(uid))
         return
@@ -935,30 +1051,55 @@ def process_add_candidate(message):
     for name in new_names:
         poll["options"].append({"name": name, "voters": []})
     save_db(db)
-
     refresh_channel_poll_message(pid)
-    added_str = ", ".join(new_names)
     bot.send_message(
         message.chat.id,
-        f"✅ পোল <b>#{pid}</b>-এ নতুন নাম (<b>{added_str}</b>) যুক্ত করা হয়েছে এবং চ্যানেলের পোস্ট লাইভ আপডেট হয়ে গেছে!",
+        f"✅ পোল <b>#{pid}</b>-এ নতুন নাম (<b>{', '.join(new_names)}</b>) যুক্ত করা হয়েছে!",
         reply_markup=main_menu_keyboard(uid)
     )
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("editrem:"))
+def cb_edit_remove_menu(call):
+    pid = call.data.split(":")[1]
+    poll = db["polls"].get(pid)
+    if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
+        return
+    if len(poll["options"]) <= 1:
+        bot.answer_callback_query(call.id, "⚠️ অন্তত ১ জন প্রার্থী রাখতেই হবে!", show_alert=True)
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for idx, o in enumerate(poll["options"]):
+        markup.add(types.InlineKeyboardButton(f"❌ বাদ দিন: {o['name']} ({len(o['voters'])} ভোট)", callback_data=f"remopt:{pid}:{idx}"))
+    bot.send_message(call.message.chat.id, f"➖ <b>পোল #{pid} থেকে যে প্রার্থীকে বাদ দিতে চান তাতে চাপুন:</b>", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("remopt:"))
+def cb_confirm_remove_opt(call):
+    parts = call.data.split(":")
+    pid, idx = parts[1], int(parts[2])
+    poll = db["polls"].get(pid)
+    if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
+        return
+    if len(poll["options"]) <= 1 or idx >= len(poll["options"]):
+        bot.answer_callback_query(call.id, "⚠️ বাদ দেওয়া সম্ভব নয়!", show_alert=True)
+        return
+    removed = poll["options"].pop(idx)
+    save_db(db)
+    refresh_channel_poll_message(pid)
+    bot.answer_callback_query(call.id, f"🗑 '{removed['name']}'-কে পোল থেকে বাদ দেওয়া হয়েছে!", show_alert=True)
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception:
+        pass
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("editq:"))
 def cb_edit_question(call):
     pid = call.data.split(":")[1]
     poll = db["polls"].get(pid)
-    if not poll:
-        return
-    if call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID:
+    if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
         return
     uid = call.from_user.id
     user_states[uid] = f"editing_q:{pid}"
-    bot.send_message(
-        call.message.chat.id,
-        f"📝 <b>পোল #{pid}-এর নতুন প্রশ্ন/শিরোনাম লিখে পাঠান:</b>",
-        reply_markup=cancel_keyboard(uid)
-    )
+    bot.send_message(call.message.chat.id, f"📝 <b>পোল #{pid}-এর নতুন প্রশ্ন/শিরোনাম লিখে পাঠান:</b>", reply_markup=cancel_keyboard(uid))
 
 @bot.message_handler(func=lambda m: str(user_states.get(m.from_user.id, "")).startswith("editing_q:"), content_types=["text"])
 def process_edit_question(message):
@@ -967,57 +1108,25 @@ def process_edit_question(message):
     poll = db["polls"].get(pid)
     if not poll:
         return
-
     poll["question"] = message.text.strip()
     save_db(db)
     refresh_channel_poll_message(pid)
-    bot.send_message(
-        message.chat.id,
-        f"✅ পোল <b>#{pid}</b>-এর প্রশ্ন সফলভাবে আপডেট করা হয়েছে!",
-        reply_markup=main_menu_keyboard(uid)
-    )
+    bot.send_message(message.chat.id, f"✅ পোল <b>#{pid}</b>-এর প্রশ্ন সফলভাবে আপডেট করা হয়েছে!", reply_markup=main_menu_keyboard(uid))
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("editwin:"))
 def cb_edit_winner(call):
     pid = call.data.split(":")[1]
     poll = db["polls"].get(pid)
-    if not poll:
+    if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
         return
-    if call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID:
-        return
-
-    poll["is_open"] = False
-    save_db(db)
-    refresh_channel_poll_message(pid)
-
-    sorted_opts = sorted(poll["options"], key=lambda x: len(x["voters"]), reverse=True)
-    winner = sorted_opts[0]
-    total_v = sum(len(o["voters"]) for o in poll["options"])
-    standings = "\n".join([f"{idx+1}. <b>{o['name']}</b> — <code>{len(o['voters'])}</code> ভোট" for idx, o in enumerate(sorted_opts)])
-
-    win_msg = (
-        f"🏆🎉 <b>FINAL POLL RESULT (#{pid})</b> 🎉🏆\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"❓ <b>প্রশ্ন:</b> {poll['question']}\n\n"
-        f"👑 <b>বিজয়ী (Winner):</b> 🔥 <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)\n\n"
-        f"📊 <b>চূড়ান্ত ফলাফল (মোট {total_v} ভোট):</b>\n"
-        f"{standings}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛑 <b>স্ট্যাটাস:</b> ভোটিং সমাপ্ত"
-    )
-    try:
-        bot.send_message(poll["channel_id"], win_msg)
-        bot.answer_callback_query(call.id, "🏆 চ্যানেলে উইনার রেজাল্ট পোস্ট করা হয়েছে!", show_alert=True)
-    except Exception as e:
-        bot.answer_callback_query(call.id, f"❌ Error: {e}", show_alert=True)
+    announce_poll_winner(pid, auto_closed=False)
+    bot.answer_callback_query(call.id, "🏆 চ্যানেলে উইনার রেজাল্ট পোস্ট করা হয়েছে!", show_alert=True)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("edittoggle:"))
 def cb_edit_toggle(call):
     pid = call.data.split(":")[1]
     poll = db["polls"].get(pid)
-    if not poll:
-        return
-    if call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID:
+    if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
         return
     poll["is_open"] = not poll.get("is_open", True)
     save_db(db)
@@ -1028,9 +1137,7 @@ def cb_edit_toggle(call):
 def cb_edit_delete(call):
     pid = call.data.split(":")[1]
     poll = db["polls"].get(pid)
-    if not poll:
-        return
-    if call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID:
+    if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
         return
     del db["polls"][pid]
     save_db(db)
@@ -1169,7 +1276,7 @@ RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 
 @app.route("/")
 def home():
-    return "Channel Vote Maker (@Votemaker5bot) is Live 24/7!", 200
+    return "Channel Vote Maker (@Votemaker5bot) Pro Edition is Live 24/7!", 200
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -1189,6 +1296,7 @@ def setup_webhook_async():
         print("Webhook error:", e)
 
 if __name__ == "__main__":
+    threading.Thread(target=auto_close_watcher, daemon=True).start()
     if RENDER_URL:
         threading.Thread(target=setup_webhook_async, daemon=True).start()
         port = int(os.environ.get("PORT", 10000))
