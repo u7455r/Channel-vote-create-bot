@@ -33,15 +33,19 @@ draft_polls = {}
 
 def load_db():
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if "vip_users" not in data:
-                data["vip_users"] = []
-            if "verified_users" not in data:
-                data["verified_users"] = []
-            if not data.get("log_channel"):
-                data["log_channel"] = DEFAULT_LOG_CHANNEL
-            return data
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                data.setdefault("vip_users", [])
+                data.setdefault("verified_users", [])
+                data.setdefault("users", {})
+                data.setdefault("polls", {})
+                data.setdefault("poll_counter", 100)
+                if not data.get("log_channel"):
+                    data["log_channel"] = DEFAULT_LOG_CHANNEL
+                return data
+        except Exception:
+            pass
     return {
         "log_channel": DEFAULT_LOG_CHANNEL,
         "vip_users": [],
@@ -255,7 +259,7 @@ def t(user_id, key):
     return TEXTS.get(get_lang(user_id), TEXTS["bn"]).get(key, "")
 
 def is_vip(user_id):
-    return user_id == ADMIN_ID or int(user_id) in db.get("vip_users", [])
+    return int(user_id) == ADMIN_ID or int(user_id) in db.get("vip_users", [])
 
 def is_verified_creator(user_id):
     uid_int = int(user_id)
@@ -286,7 +290,7 @@ def main_menu_keyboard(user_id):
     markup.row(t(user_id, "btn_edit"))
     markup.row(t(user_id, "btn_buy"), t(user_id, "btn_support"))
     markup.row(t(user_id, "btn_refer"), t(user_id, "btn_lang"))
-    if user_id == ADMIN_ID:
+    if int(user_id) == ADMIN_ID:
         markup.row(t(user_id, "btn_admin"))
     return markup
 
@@ -333,7 +337,6 @@ def make_progress_bar(count, total):
     return f"{bar} {pct}%"
 
 def get_rank_medals(options):
-    # ভোটের সংখ্যার ওপর ভিত্তি করে 🥇 🥈 🥉 র‍্যাংক নির্ধারণ
     counts = sorted(list(set(len(o["voters"]) for o in options if len(o["voters"]) > 0)), reverse=True)
     medals = {}
     for idx, o in enumerate(options):
@@ -416,8 +419,47 @@ def refresh_channel_poll_message(pid):
             bot.edit_message_caption(caption, poll["channel_id"], poll["message_id"], reply_markup=markup)
         else:
             bot.edit_message_text(caption, poll["channel_id"], poll["message_id"], reply_markup=markup)
+    except Exception:
+        pass
+
+def deduct_vote_on_channel_leave(channel_id, left_user_id):
+    """কেউ চ্যানেল থেকে বের হয়ে গেলে চলমান পোল থেকে তার ভোট স্বয়ংক্রিয়ভাবে মাইনাস (-1) করবে"""
+    changed_any = False
+    for pid, poll in list(db.get("polls", {}).items()):
+        if not poll.get("is_open", True):
+            continue
+        if str(poll.get("channel_id")) != str(channel_id):
+            continue
+        for opt in poll["options"]:
+            if left_user_id in opt["voters"]:
+                opt["voters"].remove(left_user_id)
+                changed_any = True
+                save_db(db)
+                refresh_channel_poll_message(pid)
+                rem_total = sum(len(o["voters"]) for o in poll["options"])
+                leave_log = (
+                    f"⚠️ <b>চ্যানেল লিভ করার কারণে ভোট মাইনাস (-1) হয়েছে!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🆔 <b>Poll ID:</b> <code>#{pid}</code> ({poll['channel_username']})\n"
+                    f"👤 <b>যিনি লিভ নিয়েছেন:</b> <code>{left_user_id}</code>\n"
+                    f"➖ <b>ভোট কমেছে:</b> {opt['name']} (বর্তমান মোট ভোট: {rem_total})\n"
+                    f"━━━━━━━━━━━━━━━━━━━━"
+                )
+                send_log_to_channel(leave_log)
+                break
+    return changed_any
+
+# টেলিগ্রাম থেকে রিয়েল-টাইম চ্যানেল লিভ ইভেন্ট ধরা
+@bot.chat_member_handler()
+def handle_member_leave_update(update: types.ChatMemberUpdated):
+    try:
+        new_status = update.new_chat_member.status
+        user_id = update.new_chat_member.user.id
+        chat_id = update.chat.id
+        if new_status in ["left", "kicked"]:
+            deduct_vote_on_channel_leave(chat_id, user_id)
     except Exception as e:
-        print("Refresh channel message error:", e)
+        print("Chat member update error:", e)
 
 def build_hourly_graph_report(pid):
     poll = db["polls"].get(pid)
@@ -484,18 +526,45 @@ def announce_poll_winner(pid, auto_closed=False):
         pass
     send_log_to_channel(f"🏁 <b>পোল #{pid} সমাপ্ত হয়েছে!</b> ({poll['channel_username']})\n🥇 বিজয়ী: <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)")
 
-# ================= AUTO-TIMER BACKGROUND WORKER =================
-def auto_close_watcher():
+# ================= BACKGROUND WATCHER (AUTO-TIMER + ANTI-LEAVE AUDIT) =================
+def background_watcher():
     while True:
         try:
             now = time.time()
             for pid, poll in list(db.get("polls", {}).items()):
+                if not poll.get("is_open", True):
+                    continue
+
+                # ১. অটো-ক্লোজ টাইমার চেক
                 close_ts = poll.get("close_at")
-                if poll.get("is_open", True) and close_ts and now >= close_ts:
+                if close_ts and now >= close_ts:
                     announce_poll_winner(pid, auto_closed=True)
+                    continue
+
+                # ২. ব্যাকগ্রাউন্ড অ্যান্টি-লিভ চেক (কেউ চ্যানেল ছেড়ে চলে গেলে ভোট মাইনাস)
+                ch_id = poll.get("channel_id")
+                removed_in_poll = False
+                for opt in poll["options"]:
+                    for vid in list(opt["voters"]):
+                        try:
+                            mem = bot.get_chat_member(ch_id, vid)
+                            if mem.status in ["left", "kicked"]:
+                                opt["voters"].remove(vid)
+                                removed_in_poll = True
+                                send_log_to_channel(
+                                    f"⚠️ <b>অ্যান্টি-লিভ অটো রিমুভ (-1 ভোট)!</b>\n"
+                                    f"🆔 Poll: <code>#{pid}</code> ({poll['channel_username']})\n"
+                                    f"👤 লিভ নেওয়া ভোটার: <code>{vid}</code> (প্রার্থী: {opt['name']})"
+                                )
+                        except Exception:
+                            pass
+                        time.sleep(0.15)
+                if removed_in_poll:
+                    save_db(db)
+                    refresh_channel_poll_message(pid)
         except Exception as e:
-            print("Auto-timer watcher error:", e)
-        time.sleep(20)
+            print("Background watcher error:", e)
+        time.sleep(30)
 
 def register_user(user, ref_by=None):
     uid = str(user.id)
@@ -548,11 +617,12 @@ def send_dashboard(chat_id, user):
     if not is_unlocked(user.id):
         send_lock_screen(chat_id, user.id)
         return
-    refs = db["users"][str(user.id)]["referrals"]
+    refs = db["users"].get(str(user.id), {}).get("referrals", 0)
     v_badge = " | ✅ <b>Verified Organizer</b>" if is_verified_creator(user.id) else ""
     bot.send_message(chat_id, t(user.id, "welcome").format(name=user.first_name, refs=refs, v_badge=v_badge), reply_markup=main_menu_keyboard(user.id))
 
 def passes_gate(message):
+    register_user(message.from_user)
     uid = message.from_user.id
     if not check_all_joined(uid):
         send_force_join_msg(message.chat.id, uid)
@@ -579,10 +649,11 @@ def handle_start(message):
             poll = db["polls"][pid]
             if 0 <= opt_idx < len(poll["options"]):
                 cand_name = poll["options"][opt_idx]["name"]
+                ch_clean = poll["channel_username"].lstrip("@")
                 markup = types.InlineKeyboardMarkup(row_width=1)
                 markup.add(
                     types.InlineKeyboardButton(f"✅ হ্যাঁ, {cand_name}-কে ভোট দিন", callback_data=f"directvote:{pid}:{opt_idx}"),
-                    types.InlineKeyboardButton("📢 চ্যানেল দেখুন", url=f"https://t.me/{poll['channel_username'].lstrip('@')}")
+                    types.InlineKeyboardButton("📢 চ্যানেল দেখুন", url=f"https://t.me/{ch_clean}" if not ch_clean.startswith("-100") else "https://t.me/bdgiveaways24")
                 )
                 bot.send_message(
                     message.chat.id,
@@ -721,6 +792,9 @@ def cb_start_wizard(call):
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "step_channel", content_types=["text"])
 def wizard_step_channel(message):
     uid = message.from_user.id
+    if uid not in draft_polls:
+        draft_polls[uid] = {"timer_hours": 0}
+
     target = message.text.strip()
     if "t.me/" in target:
         target = "@" + target.split("t.me/")[-1].strip("/")
@@ -755,6 +829,11 @@ def wizard_step_channel(message):
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "step_question", content_types=["text"])
 def wizard_step_question(message):
     uid = message.from_user.id
+    if uid not in draft_polls:
+        user_states.pop(uid, None)
+        bot.send_message(message.chat.id, t(uid, "cancelled"), reply_markup=main_menu_keyboard(uid))
+        return
+
     q_text = message.text.strip()
     draft_polls[uid]["question"] = q_text
     user_states[uid] = "step_question_confirm"
@@ -769,6 +848,9 @@ def wizard_step_question(message):
 @bot.callback_query_handler(func=lambda c: c.data.startswith("q_confirm:"))
 def cb_question_confirm(call):
     uid = call.from_user.id
+    if uid not in draft_polls:
+        bot.answer_callback_query(call.id, "⚠️ সেশন শেষ হয়ে গেছে, আবার পোল তৈরি করুন।", show_alert=True)
+        return
     action = call.data.split(":")[1]
     if action == "rewrite":
         user_states[uid] = "step_question"
@@ -780,6 +862,11 @@ def cb_question_confirm(call):
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "step_photo", content_types=["text", "photo"])
 def wizard_step_photo(message):
     uid = message.from_user.id
+    if uid not in draft_polls:
+        user_states.pop(uid, None)
+        bot.send_message(message.chat.id, t(uid, "cancelled"), reply_markup=main_menu_keyboard(uid))
+        return
+
     if message.content_type == "photo":
         draft_polls[uid]["photo_id"] = message.photo[-1].file_id
     elif message.text in [TEXTS["bn"]["btn_text_only"], TEXTS["en"]["btn_text_only"]]:
@@ -805,7 +892,8 @@ def build_draft_preview(uid):
         f"🏅 <b>ক্রিয়েটর ব্যাজ:</b> {v_tag}\n"
         f"❓ <b>প্রশ্ন:</b> {d['question']}\n"
         f"🖼 <b>ছবি যুক্ত:</b> {has_pic}\n"
-        f"⏳ <b>অটো টাইমার:</b> {timer_label}\n\n"
+        f"⏳ <b>অটো টাইমার:</b> {timer_label}\n"
+        f"🛡 <b>অ্যান্টি-লিভ প্রোটেকশন:</b> চালু (চ্যানেল ছাড়লে ভোট মাইনাস হবে)\n\n"
         f"📝 <b>প্রার্থীসমূহ:</b>\n{cands_list}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⏱ <i>নিচের বাটন থেকে অটো-ক্লোজ টাইমার সেট করতে পারেন:</i>"
@@ -825,6 +913,11 @@ def build_draft_preview(uid):
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "step_options", content_types=["text"])
 def wizard_step_options(message):
     uid = message.from_user.id
+    if uid not in draft_polls:
+        user_states.pop(uid, None)
+        bot.send_message(message.chat.id, t(uid, "cancelled"), reply_markup=main_menu_keyboard(uid))
+        return
+
     raw_names = [name.strip() for name in message.text.split("&") if name.strip()]
     if not raw_names or len(raw_names) > 30:
         bot.send_message(message.chat.id, t(uid, "invalid_options"), reply_markup=cancel_keyboard(uid))
@@ -839,6 +932,7 @@ def wizard_step_options(message):
 def cb_set_draft_timer(call):
     uid = call.from_user.id
     if uid not in draft_polls:
+        bot.answer_callback_query(call.id, "⚠️ সেশন শেষ হয়ে গেছে।", show_alert=True)
         return
     hrs = int(call.data.split(":")[1])
     draft_polls[uid]["timer_hours"] = hrs
@@ -847,6 +941,7 @@ def cb_set_draft_timer(call):
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
     except Exception:
         pass
+    bot.answer_callback_query(call.id, "Timer Updated!")
 
 @bot.callback_query_handler(func=lambda c: c.data == "cancel_draft")
 def cb_cancel_draft(call):
@@ -866,6 +961,7 @@ def cb_publish_poll(call):
     d = draft_polls.pop(uid, None)
     user_states.pop(uid, None)
     if not d:
+        bot.answer_callback_query(call.id, "⚠️ পোলটি ইতোমধ্যে পাঠানো হয়েছে বা বাতিল হয়েছে।", show_alert=True)
         return
 
     db["poll_counter"] += 1
@@ -941,7 +1037,7 @@ def cb_publish_poll(call):
     )
     send_log_to_channel(auto_log)
 
-# ================= LIVE VOTING, HOURLY TRACKING, WITHDRAW & CLOSE =================
+# ================= LIVE VOTING, ANTI-LEAVE CHECK, WITHDRAW & CLOSE =================
 def process_vote_action(call, pid, opt_idx, from_direct=False):
     voter = call.from_user
     vid = voter.id
@@ -953,11 +1049,15 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
     if not poll.get("is_open", True):
         bot.answer_callback_query(call.id, "🛑 পোলটি বন্ধ হয়ে গেছে!", show_alert=True)
         return
+    if opt_idx < 0 or opt_idx >= len(poll["options"]):
+        bot.answer_callback_query(call.id, "❌ এই প্রার্থীটি আর তালিকায় নেই!", show_alert=True)
+        return
 
+    # চ্যানেলে জয়েন আছে কি না কঠোরভাবে যাচাই (জয়েন না থাকলে ভোট কাউন্ট হবে না)
     try:
         ch_member = bot.get_chat_member(poll["channel_id"], vid)
         if ch_member.status in ["left", "kicked"]:
-            bot.answer_callback_query(call.id, "⚠️ ভোট দিতে হলে আগে এই চ্যানেলে জয়েন করুন!", show_alert=True)
+            bot.answer_callback_query(call.id, "⚠️ ভোট দিতে হলে আগে এই চ্যানেলে জয়েন করুন! (চ্যানেল ছাড়লে ভোট বাতিল হয়ে যাবে)", show_alert=True)
             return
     except Exception:
         pass
@@ -971,10 +1071,8 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
     if not from_direct:
         poll["message_id"] = call.message.message_id
 
-    # আওয়ারলি ভোট গ্রাফ ডাটা আপডেট
     hour_key = datetime.now().strftime("%I %p")
-    if "hourly_votes" not in poll:
-        poll["hourly_votes"] = {}
+    poll.setdefault("hourly_votes", {})
     poll["hourly_votes"][hour_key] = poll["hourly_votes"].get(hour_key, 0) + 1
 
     save_db(db)
@@ -982,7 +1080,7 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
     chosen_name = poll["options"][opt_idx]["name"]
     cand_total = len(poll["options"][opt_idx]["voters"])
     poll_total = sum(len(o["voters"]) for o in poll["options"])
-    bot.answer_callback_query(call.id, f"✅ আপনার ভোট '{chosen_name}'-কে যুক্ত হয়েছে!", show_alert=True)
+    bot.answer_callback_query(call.id, f"✅ আপনার ভোট '{chosen_name}'-কে যুক্ত হয়েছে! (চ্যানেল ছেড়ে গেলে ভোট বাতিল হবে)", show_alert=True)
 
     refresh_channel_poll_message(pid)
 
@@ -1031,6 +1129,7 @@ def cb_withdraw_vote(call):
     vid = call.from_user.id
     poll = db["polls"].get(pid)
     if not poll or not poll.get("is_open", True):
+        bot.answer_callback_query(call.id, "🛑 পোলটি বন্ধ হয়ে গেছে!", show_alert=True)
         return
 
     removed_from = None
@@ -1387,7 +1486,7 @@ RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 
 @app.route("/")
 def home():
-    return "Channel Vote Maker (@Votemaker5bot) Ultimate Edition is Live 24/7!", 200
+    return "Channel Vote Maker (@Votemaker5bot) Final Pro Edition is Live 24/7!", 200
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -1402,12 +1501,12 @@ def setup_webhook_async():
         bot.remove_webhook()
         time.sleep(1)
         if RENDER_URL:
-            bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
+            bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}", allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"])
     except Exception as e:
         print("Webhook error:", e)
 
 if __name__ == "__main__":
-    threading.Thread(target=auto_close_watcher, daemon=True).start()
+    threading.Thread(target=background_watcher, daemon=True).start()
     if RENDER_URL:
         threading.Thread(target=setup_webhook_async, daemon=True).start()
         port = int(os.environ.get("PORT", 10000))
@@ -1415,4 +1514,4 @@ if __name__ == "__main__":
     else:
         bot.remove_webhook()
         time.sleep(1)
-        bot.infinity_polling(skip_pending=True)
+        bot.infinity_polling(skip_pending=True, allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"])
