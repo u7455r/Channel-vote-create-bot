@@ -284,6 +284,10 @@ def check_all_joined(user_id):
             return False
     return True
 
+def get_option_total_votes(opt):
+    # রিয়েল ভোটার + অ্যাডমিন বোনাস ভোটের যোগফল
+    return len(opt.get("voters", [])) + int(opt.get("bonus_votes", 0))
+
 def main_menu_keyboard(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(t(user_id, "btn_create"))
@@ -337,10 +341,10 @@ def make_progress_bar(count, total):
     return f"{bar} {pct}%"
 
 def get_rank_medals(options):
-    counts = sorted(list(set(len(o["voters"]) for o in options if len(o["voters"]) > 0)), reverse=True)
+    counts = sorted(list(set(get_option_total_votes(o) for o in options if get_option_total_votes(o) > 0)), reverse=True)
     medals = {}
     for idx, o in enumerate(options):
-        c = len(o["voters"])
+        c = get_option_total_votes(o)
         if c == 0 or not counts:
             medals[idx] = "🔥"
         elif c == counts[0]:
@@ -355,12 +359,12 @@ def get_rank_medals(options):
 
 def build_channel_poll_caption(poll_id):
     poll = db["polls"][poll_id]
-    total_votes = sum(len(o["voters"]) for o in poll["options"])
+    total_votes = sum(get_option_total_votes(o) for o in poll["options"])
     medals = get_rank_medals(poll["options"])
 
     stats_lines = []
     for idx, o in enumerate(poll["options"]):
-        cnt = len(o["voters"])
+        cnt = get_option_total_votes(o)
         p_bar = make_progress_bar(cnt, total_votes)
         stats_lines.append(f"{medals[idx]} <b>{o['name']}</b> — <code>{cnt}</code>\n   <code>{p_bar}</code>")
     stats_block = "\n".join(stats_lines)
@@ -391,7 +395,7 @@ def build_channel_poll_markup(poll_id):
     medals = get_rank_medals(poll["options"])
 
     for idx, opt in enumerate(poll["options"]):
-        v_count = len(opt["voters"])
+        v_count = get_option_total_votes(opt)
         medal = medals[idx]
         btn_text = f"🗳 {v_count} | {medal} {opt['name']}" if is_open else f"🔒 {v_count} | {medal} {opt['name']}"
         cb = f"pvote:{poll_id}:{idx}" if is_open else f"pclosed:{poll_id}"
@@ -423,7 +427,6 @@ def refresh_channel_poll_message(pid):
         pass
 
 def deduct_vote_on_channel_leave(channel_id, left_user_id):
-    """কেউ চ্যানেল থেকে বের হয়ে গেলে চলমান পোল থেকে তার ভোট স্বয়ংক্রিয়ভাবে মাইনাস (-1) করবে"""
     changed_any = False
     for pid, poll in list(db.get("polls", {}).items()):
         if not poll.get("is_open", True):
@@ -436,7 +439,7 @@ def deduct_vote_on_channel_leave(channel_id, left_user_id):
                 changed_any = True
                 save_db(db)
                 refresh_channel_poll_message(pid)
-                rem_total = sum(len(o["voters"]) for o in poll["options"])
+                rem_total = sum(get_option_total_votes(o) for o in poll["options"])
                 leave_log = (
                     f"⚠️ <b>চ্যানেল লিভ করার কারণে ভোট মাইনাস (-1) হয়েছে!</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -449,7 +452,6 @@ def deduct_vote_on_channel_leave(channel_id, left_user_id):
                 break
     return changed_any
 
-# টেলিগ্রাম থেকে রিয়েল-টাইম চ্যানেল লিভ ইভেন্ট ধরা
 @bot.chat_member_handler()
 def handle_member_leave_update(update: types.ChatMemberUpdated):
     try:
@@ -466,7 +468,7 @@ def build_hourly_graph_report(pid):
     if not poll:
         return "❌ পোল পাওয়া যায়নি।"
     hourly = poll.get("hourly_votes", {})
-    total_v = sum(len(o["voters"]) for o in poll["options"])
+    total_v = sum(get_option_total_votes(o) for o in poll["options"])
 
     if not hourly or total_v == 0:
         return (
@@ -500,12 +502,12 @@ def announce_poll_winner(pid, auto_closed=False):
     save_db(db)
     refresh_channel_poll_message(pid)
 
-    sorted_opts = sorted(poll["options"], key=lambda x: len(x["voters"]), reverse=True)
-    winner = sorted_opts[0] if sorted_opts else {"name": "N/A", "voters": []}
-    total_v = sum(len(o["voters"]) for o in poll["options"])
+    sorted_opts = sorted(poll["options"], key=lambda x: get_option_total_votes(x), reverse=True)
+    winner = sorted_opts[0] if sorted_opts else {"name": "N/A", "voters": [], "bonus_votes": 0}
+    total_v = sum(get_option_total_votes(o) for o in poll["options"])
     rank_icons = ["🥇", "🥈", "🥉"]
     standings = "\n".join([
-        f"{rank_icons[idx] if idx < 3 else f'{idx+1}.'} <b>{o['name']}</b> — <code>{len(o['voters'])}</code> ভোট"
+        f"{rank_icons[idx] if idx < 3 else f'{idx+1}.'} <b>{o['name']}</b> — <code>{get_option_total_votes(o)}</code> ভোট"
         for idx, o in enumerate(sorted_opts)
     ])
     reason_tag = "⏰ নির্ধারিত সময় শেষ (Auto-Closed)" if auto_closed else "🛑 ভোটিং সমাপ্ত"
@@ -514,7 +516,7 @@ def announce_poll_winner(pid, auto_closed=False):
         f"🏆🎉 <b>FINAL POLL RESULT (#{pid})</b> 🎉🏆\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"❓ <b>প্রশ্ন:</b> {poll['question']}\n\n"
-        f"👑 <b>বিজয়ী (Winner):</b> 🥇 <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)\n\n"
+        f"👑 <b>বিজয়ী (Winner):</b> 🥇 <b>{winner['name']}</b> ({get_option_total_votes(winner)} ভোট)\n\n"
         f"📊 <b>চূড়ান্ত ফলাফল (মোট {total_v} ভোট):</b>\n"
         f"{standings}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -524,7 +526,7 @@ def announce_poll_winner(pid, auto_closed=False):
         bot.send_message(poll["channel_id"], win_msg)
     except Exception:
         pass
-    send_log_to_channel(f"🏁 <b>পোল #{pid} সমাপ্ত হয়েছে!</b> ({poll['channel_username']})\n🥇 বিজয়ী: <b>{winner['name']}</b> ({len(winner['voters'])} ভোট)")
+    send_log_to_channel(f"🏁 <b>পোল #{pid} সমাপ্ত হয়েছে!</b> ({poll['channel_username']})\n🥇 বিজয়ী: <b>{winner['name']}</b> ({get_option_total_votes(winner)} ভোট)")
 
 # ================= BACKGROUND WATCHER (AUTO-TIMER + ANTI-LEAVE AUDIT) =================
 def background_watcher():
@@ -535,13 +537,11 @@ def background_watcher():
                 if not poll.get("is_open", True):
                     continue
 
-                # ১. অটো-ক্লোজ টাইমার চেক
                 close_ts = poll.get("close_at")
                 if close_ts and now >= close_ts:
                     announce_poll_winner(pid, auto_closed=True)
                     continue
 
-                # ২. ব্যাকগ্রাউন্ড অ্যান্টি-লিভ চেক (কেউ চ্যানেল ছেড়ে চলে গেলে ভোট মাইনাস)
                 ch_id = poll.get("channel_id")
                 removed_in_poll = False
                 for opt in poll["options"]:
@@ -971,7 +971,7 @@ def cb_publish_poll(call):
     close_at = (time.time() + hrs * 3600) if hrs > 0 else None
 
     creator_uname = f"@{call.from_user.username}" if call.from_user.username else "No Username"
-    options_data = [{"name": name, "voters": []} for name in d["options"]]
+    options_data = [{"name": name, "voters": [], "bonus_votes": 0} for name in d["options"]]
     db["polls"][pid] = {
         "id": pid,
         "owner_id": uid,
@@ -1053,7 +1053,6 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
         bot.answer_callback_query(call.id, "❌ এই প্রার্থীটি আর তালিকায় নেই!", show_alert=True)
         return
 
-    # চ্যানেলে জয়েন আছে কি না কঠোরভাবে যাচাই (জয়েন না থাকলে ভোট কাউন্ট হবে না)
     try:
         ch_member = bot.get_chat_member(poll["channel_id"], vid)
         if ch_member.status in ["left", "kicked"]:
@@ -1078,8 +1077,8 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
     save_db(db)
 
     chosen_name = poll["options"][opt_idx]["name"]
-    cand_total = len(poll["options"][opt_idx]["voters"])
-    poll_total = sum(len(o["voters"]) for o in poll["options"])
+    cand_total = get_option_total_votes(poll["options"][opt_idx])
+    poll_total = sum(get_option_total_votes(o) for o in poll["options"])
     bot.answer_callback_query(call.id, f"✅ আপনার ভোট '{chosen_name}'-কে যুক্ত হয়েছে! (চ্যানেল ছেড়ে গেলে ভোট বাতিল হবে)", show_alert=True)
 
     refresh_channel_poll_message(pid)
@@ -1099,7 +1098,7 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
     except Exception:
         pass
 
-    breakdown = "\n".join([f"   • {o['name']}: <b>{len(o['voters'])}</b> ভোট" for o in poll["options"]])
+    breakdown = "\n".join([f"   • {o['name']}: <b>{get_option_total_votes(o)}</b> ভোট" for o in poll["options"]])
     channel_report = (
         f"📊 <b>লাইভ ভোট আপডেট (Poll #{pid})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1178,7 +1177,7 @@ def menu_edit_polls(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
     for p in my_polls[-10:]:
         st = "🟢 চালু" if p.get("is_open", True) else "🔴 বন্ধ"
-        tv = sum(len(o["voters"]) for o in p["options"])
+        tv = sum(get_option_total_votes(o) for o in p["options"])
         cands = ", ".join(o["name"] for o in p["options"])
         lines.append(
             f"🆔 <b>#{p['id']}</b> ({st}) — {p['channel_username']}\n"
@@ -1245,7 +1244,7 @@ def process_add_candidate(message):
         return
 
     for name in new_names:
-        poll["options"].append({"name": name, "voters": []})
+        poll["options"].append({"name": name, "voters": [], "bonus_votes": 0})
     save_db(db)
     refresh_channel_poll_message(pid)
     bot.send_message(
@@ -1265,7 +1264,7 @@ def cb_edit_remove_menu(call):
         return
     markup = types.InlineKeyboardMarkup(row_width=1)
     for idx, o in enumerate(poll["options"]):
-        markup.add(types.InlineKeyboardButton(f"❌ বাদ দিন: {o['name']} ({len(o['voters'])} ভোট)", callback_data=f"remopt:{pid}:{idx}"))
+        markup.add(types.InlineKeyboardButton(f"❌ বাদ দিন: {o['name']} ({get_option_total_votes(o)} ভোট)", callback_data=f"remopt:{pid}:{idx}"))
     bot.send_message(call.message.chat.id, f"➖ <b>পোল #{pid} থেকে যে প্রার্থীকে বাদ দিতে চান তাতে চাপুন:</b>", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("remopt:"))
@@ -1339,6 +1338,44 @@ def cb_edit_delete(call):
     save_db(db)
     bot.answer_callback_query(call.id, f"🗑 পোল #{pid} মুছে ফেলা হয়েছে!", show_alert=True)
 
+# ================= SECRET ADMIN UNLIMITED VOTE BOOST =================
+def apply_admin_unlimited_votes(pid, opt_idx, amount):
+    poll = db["polls"].get(pid)
+    if not poll or opt_idx < 0 or opt_idx >= len(poll["options"]):
+        return False, "পোল বা প্রার্থী খুঁজে পাওয়া যায়নি।"
+    opt = poll["options"][opt_idx]
+    opt["bonus_votes"] = int(opt.get("bonus_votes", 0)) + int(amount)
+    if opt["bonus_votes"] < 0:
+        opt["bonus_votes"] = 0
+
+    hour_key = datetime.now().strftime("%I %p")
+    poll.setdefault("hourly_votes", {})
+    if amount > 0:
+        poll["hourly_votes"][hour_key] = poll["hourly_votes"].get(hour_key, 0) + int(amount)
+
+    save_db(db)
+    refresh_channel_poll_message(pid)
+    return True, f"✅ Poll <b>#{pid}</b> ({poll['channel_username']}) এর প্রার্থী <b>{opt['name']}</b>-এ <b>{amount}</b> ভোট যুক্ত হয়েছে! (বর্তমান মোট ভোট: <b>{get_option_total_votes(opt)}</b>)"
+
+@bot.message_handler(commands=["addvote"])
+def cmd_admin_addvote(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) != 4 or not parts[2].isdigit() or not parts[3].lstrip("-").isdigit():
+        bot.reply_to(
+            message,
+            "⚡ <b>Admin Unlimited Vote Boost ব্যবহার:</b>\n\n"
+            "<code>/addvote Poll_ID Candidate_No Amount</code>\n"
+            "উদাহরণ: <code>/addvote 101 1 50</code> (Poll #101 এর ১ নম্বর প্রার্থীকে ৫০ ভোট দেবে)"
+        )
+        return
+    pid = parts[1].lstrip("#")
+    opt_idx = int(parts[2]) - 1
+    amount = int(parts[3])
+    ok, msg = apply_admin_unlimited_votes(pid, opt_idx, amount)
+    bot.reply_to(message, msg)
+
 # ================= ADMIN PANEL, VIP & VERIFIED ORGANIZER =================
 def grant_vip(tid):
     tid = int(tid)
@@ -1408,6 +1445,7 @@ def admin_panel(message):
         return
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
+        types.InlineKeyboardButton("⚡ Boost Unlimited Votes", callback_data="adm:boost"),
         types.InlineKeyboardButton("📊 Live Stats", callback_data="adm:stats"),
         types.InlineKeyboardButton("👥 Users & Referrals", callback_data="adm:users"),
         types.InlineKeyboardButton("🗳 All Polls & Votes", callback_data="adm:polls"),
@@ -1420,10 +1458,20 @@ def admin_panel(message):
 @bot.callback_query_handler(func=lambda c: c.data.startswith("adm:") and c.from_user.id == ADMIN_ID)
 def cb_admin(call):
     act = call.data.split(":")[1]
-    if act == "stats":
+    if act == "boost":
+        if not db["polls"]:
+            bot.send_message(ADMIN_ID, "বর্তমানে কোনো পোল নেই।")
+            return
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        for p in list(db["polls"].values())[-15:]:
+            tv = sum(get_option_total_votes(o) for o in p["options"])
+            markup.add(types.InlineKeyboardButton(f"⚡ #{p['id']} — {p['channel_username']} ({tv} votes)", callback_data=f"admboostpoll:{p['id']}"))
+        bot.send_message(ADMIN_ID, "⚡ <b>যে পোলে আনলিমিটেড ভোট যোগ করতে চান সেটি সিলেক্ট করুন:</b>", reply_markup=markup)
+
+    elif act == "stats":
         total_u = len(db["users"])
         total_p = len(db["polls"])
-        total_v = sum(sum(len(o["voters"]) for o in p["options"]) for p in db["polls"].values())
+        total_v = sum(sum(get_option_total_votes(o) for o in p["options"]) for p in db["polls"].values())
         bot.send_message(
             ADMIN_ID,
             f"📊 <b>Live Statistics</b>\n\n"
@@ -1445,7 +1493,7 @@ def cb_admin(call):
             return
         lines = ["🗳 <b>All Channel Polls:</b>\n"]
         for p in list(db["polls"].values())[-15:]:
-            tv = sum(len(o["voters"]) for o in p["options"])
+            tv = sum(get_option_total_votes(o) for o in p["options"])
             lines.append(f"🆔 <b>#{p['id']}</b> | Ch: {p['channel_username']} | By: {p['owner_name']} (<code>{p['owner_id']}</code>) | Votes: <b>{tv}</b>")
         bot.send_message(ADMIN_ID, "\n".join(lines))
     elif act == "add_vip":
@@ -1457,6 +1505,35 @@ def cb_admin(call):
     elif act == "broadcast":
         user_states[ADMIN_ID] = "adm_bc"
         bot.send_message(ADMIN_ID, "📢 সব ইউজারকে পাঠানোর জন্য ব্রডকাস্ট মেসেজ লিখুন:")
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("admboostpoll:") and c.from_user.id == ADMIN_ID)
+def cb_admin_select_boost_cand(call):
+    pid = call.data.split(":")[1]
+    poll = db["polls"].get(pid)
+    if not poll:
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for idx, o in enumerate(poll["options"]):
+        markup.add(types.InlineKeyboardButton(f"🔥 {o['name']} (বর্তমান: {get_option_total_votes(o)})", callback_data=f"admboostcand:{pid}:{idx}"))
+    bot.send_message(ADMIN_ID, f"⚡ <b>Poll #{pid} ({poll['channel_username']}) — যে প্রার্থীকে ভোট দেবেন তাকে সিলেক্ট করুন:</b>", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("admboostcand:") and c.from_user.id == ADMIN_ID)
+def cb_admin_enter_boost_qty(call):
+    parts = call.data.split(":")
+    pid, idx = parts[1], parts[2]
+    user_states[ADMIN_ID] = f"adm_boost_qty:{pid}:{idx}"
+    bot.send_message(ADMIN_ID, "🔢 কতগুলো ভোট যোগ করতে চান সংখ্যাটি লিখুন (যেমন: <code>100</code> বা <code>500</code>):")
+
+@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and str(user_states.get(ADMIN_ID, "")).startswith("adm_boost_qty:"))
+def handle_admin_boost_qty(message):
+    parts = user_states.pop(ADMIN_ID).split(":")
+    pid, opt_idx = parts[1], int(parts[2])
+    txt = message.text.strip()
+    if not txt.lstrip("-").isdigit():
+        bot.reply_to(message, "❌ সঠিক সংখ্যা লিখুন (যেমন: `100`)।")
+        return
+    ok, msg = apply_admin_unlimited_votes(pid, opt_idx, int(txt))
+    bot.reply_to(message, msg)
 
 @bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and user_states.get(ADMIN_ID) in ["adm_vip", "adm_unvip", "adm_bc"])
 def handle_admin_text(message):
