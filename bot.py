@@ -285,8 +285,7 @@ def check_all_joined(user_id):
     return True
 
 def get_option_total_votes(opt):
-    # রিয়েল ভোটার + অ্যাডমিন বোনাস ভোটের যোগফল
-    return len(opt.get("voters", [])) + int(opt.get("bonus_votes", 0))
+    return max(0, len(opt.get("voters", [])) + int(opt.get("bonus_votes", 0)))
 
 def main_menu_keyboard(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -1338,24 +1337,35 @@ def cb_edit_delete(call):
     save_db(db)
     bot.answer_callback_query(call.id, f"🗑 পোল #{pid} মুছে ফেলা হয়েছে!", show_alert=True)
 
-# ================= SECRET ADMIN UNLIMITED VOTE BOOST =================
-def apply_admin_unlimited_votes(pid, opt_idx, amount):
+# ================= SECRET ADMIN VOTE BOOST (+ / -) =================
+def apply_admin_vote_adjustment(pid, opt_idx, amount):
+    """অ্যাডমিন চাইলে পজিটিভ (+) ভোট বাড়াতে বা নেগেটিভ (-) ভোট কাটতে পারবে"""
     poll = db["polls"].get(pid)
     if not poll or opt_idx < 0 or opt_idx >= len(poll["options"]):
-        return False, "পোল বা প্রার্থী খুঁজে পাওয়া যায়নি।"
+        return False, "❌ পোল বা প্রার্থী খুঁজে পাওয়া যায়নি।"
     opt = poll["options"][opt_idx]
-    opt["bonus_votes"] = int(opt.get("bonus_votes", 0)) + int(amount)
-    if opt["bonus_votes"] < 0:
-        opt["bonus_votes"] = 0
+    amount = int(amount)
 
-    hour_key = datetime.now().strftime("%I %p")
-    poll.setdefault("hourly_votes", {})
-    if amount > 0:
-        poll["hourly_votes"][hour_key] = poll["hourly_votes"].get(hour_key, 0) + int(amount)
+    if amount >= 0:
+        opt["bonus_votes"] = int(opt.get("bonus_votes", 0)) + amount
+        hour_key = datetime.now().strftime("%I %p")
+        poll.setdefault("hourly_votes", {})
+        if amount > 0:
+            poll["hourly_votes"][hour_key] = poll["hourly_votes"].get(hour_key, 0) + amount
+        action_word = f"<b>+{amount}</b> ভোট যুক্ত করা হয়েছে"
+    else:
+        to_cut = abs(amount)
+        current_total = get_option_total_votes(opt)
+        if to_cut >= current_total:
+            opt["bonus_votes"] = 0
+            opt["voters"] = []
+        else:
+            opt["bonus_votes"] = int(opt.get("bonus_votes", 0)) - to_cut
+        action_word = f"<b>-{to_cut}</b> ভোট কেটে নেওয়া হয়েছে"
 
     save_db(db)
     refresh_channel_poll_message(pid)
-    return True, f"✅ Poll <b>#{pid}</b> ({poll['channel_username']}) এর প্রার্থী <b>{opt['name']}</b>-এ <b>{amount}</b> ভোট যুক্ত হয়েছে! (বর্তমান মোট ভোট: <b>{get_option_total_votes(opt)}</b>)"
+    return True, f"✅ Poll <b>#{pid}</b> ({poll['channel_username']}) এর প্রার্থী <b>{opt['name']}</b> থেকে {action_word}! (বর্তমান মোট ভোট: <b>{get_option_total_votes(opt)}</b>)"
 
 @bot.message_handler(commands=["addvote"])
 def cmd_admin_addvote(message):
@@ -1365,15 +1375,35 @@ def cmd_admin_addvote(message):
     if len(parts) != 4 or not parts[2].isdigit() or not parts[3].lstrip("-").isdigit():
         bot.reply_to(
             message,
-            "⚡ <b>Admin Unlimited Vote Boost ব্যবহার:</b>\n\n"
+            "⚡ <b>Admin Vote Boost ব্যবহার:</b>\n\n"
             "<code>/addvote Poll_ID Candidate_No Amount</code>\n"
-            "উদাহরণ: <code>/addvote 101 1 50</code> (Poll #101 এর ১ নম্বর প্রার্থীকে ৫০ ভোট দেবে)"
+            "উদাহরণ: <code>/addvote 101 1 50</code> (৫০ ভোট বাড়বে)\n"
+            "ভোট কাটতে: <code>/cutvote 101 1 20</code> (২০ ভোট কমবে)"
         )
         return
     pid = parts[1].lstrip("#")
     opt_idx = int(parts[2]) - 1
     amount = int(parts[3])
-    ok, msg = apply_admin_unlimited_votes(pid, opt_idx, amount)
+    ok, msg = apply_admin_vote_adjustment(pid, opt_idx, amount)
+    bot.reply_to(message, msg)
+
+@bot.message_handler(commands=["cutvote"])
+def cmd_admin_cutvote(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.split()
+    if len(parts) != 4 or not parts[2].isdigit() or not parts[3].isdigit():
+        bot.reply_to(
+            message,
+            "✂️ <b>Admin Vote Cut ব্যবহার:</b>\n\n"
+            "<code>/cutvote Poll_ID Candidate_No Amount</code>\n"
+            "উদাহরণ: <code>/cutvote 101 1 20</code> (Poll #101 এর ১ নম্বর প্রার্থী থেকে ২০ ভোট কেটে নেবে)"
+        )
+        return
+    pid = parts[1].lstrip("#")
+    opt_idx = int(parts[2]) - 1
+    amount = -abs(int(parts[3]))
+    ok, msg = apply_admin_vote_adjustment(pid, opt_idx, amount)
     bot.reply_to(message, msg)
 
 # ================= ADMIN PANEL, VIP & VERIFIED ORGANIZER =================
@@ -1445,7 +1475,8 @@ def admin_panel(message):
         return
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("⚡ Boost Unlimited Votes", callback_data="adm:boost"),
+        types.InlineKeyboardButton("⚡ Boost Votes (+)", callback_data="adm:boost"),
+        types.InlineKeyboardButton("✂️ Cut Votes (-)", callback_data="adm:cut"),
         types.InlineKeyboardButton("📊 Live Stats", callback_data="adm:stats"),
         types.InlineKeyboardButton("👥 Users & Referrals", callback_data="adm:users"),
         types.InlineKeyboardButton("🗳 All Polls & Votes", callback_data="adm:polls"),
@@ -1458,15 +1489,16 @@ def admin_panel(message):
 @bot.callback_query_handler(func=lambda c: c.data.startswith("adm:") and c.from_user.id == ADMIN_ID)
 def cb_admin(call):
     act = call.data.split(":")[1]
-    if act == "boost":
+    if act in ["boost", "cut"]:
         if not db["polls"]:
             bot.send_message(ADMIN_ID, "বর্তমানে কোনো পোল নেই।")
             return
+        mode_tag = "➕ ভোট বাড়ানোর" if act == "boost" else "✂️ ভোট কাটার"
         markup = types.InlineKeyboardMarkup(row_width=1)
         for p in list(db["polls"].values())[-15:]:
             tv = sum(get_option_total_votes(o) for o in p["options"])
-            markup.add(types.InlineKeyboardButton(f"⚡ #{p['id']} — {p['channel_username']} ({tv} votes)", callback_data=f"admboostpoll:{p['id']}"))
-        bot.send_message(ADMIN_ID, "⚡ <b>যে পোলে আনলিমিটেড ভোট যোগ করতে চান সেটি সিলেক্ট করুন:</b>", reply_markup=markup)
+            markup.add(types.InlineKeyboardButton(f"#{p['id']} — {p['channel_username']} ({tv} votes)", callback_data=f"admvpoll:{act}:{p['id']}"))
+        bot.send_message(ADMIN_ID, f"<b>{mode_tag} জন্য পোলটি সিলেক্ট করুন:</b>", reply_markup=markup)
 
     elif act == "stats":
         total_u = len(db["users"])
@@ -1506,33 +1538,36 @@ def cb_admin(call):
         user_states[ADMIN_ID] = "adm_bc"
         bot.send_message(ADMIN_ID, "📢 সব ইউজারকে পাঠানোর জন্য ব্রডকাস্ট মেসেজ লিখুন:")
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("admboostpoll:") and c.from_user.id == ADMIN_ID)
-def cb_admin_select_boost_cand(call):
-    pid = call.data.split(":")[1]
+@bot.callback_query_handler(func=lambda c: c.data.startswith("admvpoll:") and c.from_user.id == ADMIN_ID)
+def cb_admin_select_vote_cand(call):
+    parts = call.data.split(":")
+    mode, pid = parts[1], parts[2]
     poll = db["polls"].get(pid)
     if not poll:
         return
     markup = types.InlineKeyboardMarkup(row_width=1)
     for idx, o in enumerate(poll["options"]):
-        markup.add(types.InlineKeyboardButton(f"🔥 {o['name']} (বর্তমান: {get_option_total_votes(o)})", callback_data=f"admboostcand:{pid}:{idx}"))
-    bot.send_message(ADMIN_ID, f"⚡ <b>Poll #{pid} ({poll['channel_username']}) — যে প্রার্থীকে ভোট দেবেন তাকে সিলেক্ট করুন:</b>", reply_markup=markup)
+        markup.add(types.InlineKeyboardButton(f"🔥 {o['name']} (বর্তমান: {get_option_total_votes(o)})", callback_data=f"admvqty:{mode}:{pid}:{idx}"))
+    bot.send_message(ADMIN_ID, f"<b>Poll #{pid} ({poll['channel_username']}) — প্রার্থী সিলেক্ট করুন:</b>", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith("admboostcand:") and c.from_user.id == ADMIN_ID)
-def cb_admin_enter_boost_qty(call):
+@bot.callback_query_handler(func=lambda c: c.data.startswith("admvqty:") and c.from_user.id == ADMIN_ID)
+def cb_admin_enter_vote_qty(call):
     parts = call.data.split(":")
-    pid, idx = parts[1], parts[2]
-    user_states[ADMIN_ID] = f"adm_boost_qty:{pid}:{idx}"
-    bot.send_message(ADMIN_ID, "🔢 কতগুলো ভোট যোগ করতে চান সংখ্যাটি লিখুন (যেমন: <code>100</code> বা <code>500</code>):")
+    mode, pid, idx = parts[1], parts[2], parts[3]
+    user_states[ADMIN_ID] = f"adm_v_qty:{mode}:{pid}:{idx}"
+    label = "যোগ করতে" if mode == "boost" else "কেটে নিতে"
+    bot.send_message(ADMIN_ID, f"🔢 কতগুলো ভোট <b>{label}</b> চান সংখ্যাটি লিখুন (যেমন: <code>50</code> বা <code>200</code>):")
 
-@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and str(user_states.get(ADMIN_ID, "")).startswith("adm_boost_qty:"))
-def handle_admin_boost_qty(message):
+@bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and str(user_states.get(ADMIN_ID, "")).startswith("adm_v_qty:"))
+def handle_admin_vote_qty(message):
     parts = user_states.pop(ADMIN_ID).split(":")
-    pid, opt_idx = parts[1], int(parts[2])
+    mode, pid, opt_idx = parts[1], parts[2], int(parts[3])
     txt = message.text.strip()
-    if not txt.lstrip("-").isdigit():
-        bot.reply_to(message, "❌ সঠিক সংখ্যা লিখুন (যেমন: `100`)।")
+    if not txt.isdigit():
+        bot.reply_to(message, "❌ সঠিক ধনাত্মক সংখ্যা লিখুন (যেমন: `50`)।")
         return
-    ok, msg = apply_admin_unlimited_votes(pid, opt_idx, int(txt))
+    qty = int(txt) if mode == "boost" else -int(txt)
+    ok, msg = apply_admin_vote_adjustment(pid, opt_idx, qty)
     bot.reply_to(message, msg)
 
 @bot.message_handler(func=lambda m: m.from_user.id == ADMIN_ID and user_states.get(ADMIN_ID) in ["adm_vip", "adm_unvip", "adm_bc"])
