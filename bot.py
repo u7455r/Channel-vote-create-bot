@@ -8,19 +8,17 @@ from telebot import types
 from flask import Flask, request
 
 # ================= CONFIGURATION =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9224149092:AAFk70z43Sqr6BCyLLK45SCvWKL5t1C3dsw")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "9224149092:AAHO-bMBo-UsquA36EB7ay-f708mk7iaFWw")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8298133943"))
 ADMIN_USERNAME = "@rafimhossen"
 BOT_USERNAME = "Votemaker5bot"
 DEFAULT_LOG_CHANNEL = "@optchannel6"
 PROMO_CHANNEL = "@bdgiveaways24"
 
+# শুধুমাত্র মেইন চ্যানেল ও গ্রুপ ফোর্স-জয়েনে রাখা হয়েছে (OTP ও অন্যান্য চ্যানেল বাদ দেওয়া হয়েছে)
 REQUIRED_CHATS = [
-    {"username": "@optchannel6", "url": "https://t.me/optchannel6", "name": "Opt Channel 6"},
-    {"username": "@PremiumApkVaultBD", "url": "https://t.me/PremiumApkVaultBD", "name": "Premium Apk Vault BD"},
-    {"username": "@ProApkHub_Official", "url": "https://t.me/ProApkHub_Official", "name": "Pro Apk Hub Official"},
-    {"username": "@bdgivewaychat", "url": "https://t.me/bdgivewaychat", "name": "BD Giveaway Chat"},
     {"username": "@bdgiveaways24", "url": "https://t.me/bdgiveaways24", "name": "BD Giveaways 24"},
+    {"username": "@bdgivewaychat", "url": "https://t.me/bdgivewaychat", "name": "BD Giveaway Chat"},
 ]
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML", threaded=False)
@@ -45,7 +43,7 @@ def default_db_structure():
 
 # ================= TELEGRAM PINNED CLOUD BACKUP & RESTORE =================
 def restore_db_from_telegram():
-    """Render রিস্টার্ট হলে @optchannel6 এর পিন করা ব্যাকআপ ফাইল থেকে সব ডাটা রিস্টোর করবে"""
+    """Render রিস্টার্ট হলে প্রাইভেট লগ চ্যানেলের পিন করা ব্যাকআপ ফাইল থেকে সব ডাটা রিস্টোর করবে"""
     try:
         chat = bot.get_chat(DEFAULT_LOG_CHANNEL)
         pinned = getattr(chat, "pinned_message", None)
@@ -92,7 +90,7 @@ def load_db():
     return default_db_structure()
 
 def push_backup_to_telegram():
-    """@optchannel6 চ্যানেলে ডাটাবেস ব্যাকআপ ফাইল আপলোড ও পিন করবে"""
+    """প্রাইভেট লগ চ্যানেলে ডাটাবেস ব্যাকআপ ফাইল আপলোড ও পিন করবে"""
     global backup_dirty
     try:
         with db_lock:
@@ -138,11 +136,11 @@ TEXTS = {
     "bn": {
         "choose_lang": "🌐 অনুগ্রহ করে আপনার ভাষা নির্বাচন করুন / Please select your language:",
         "force_join": (
-            "⚠️ <b>বটটি ব্যবহার করতে হলে নিচের ৫টি চ্যানেল ও গ্রুপে অবশ্যই জয়েন থাকতে হবে!</b>\n\n"
+            "⚠️ <b>বটটি ব্যবহার করতে হলে নিচের চ্যানেল ও গ্রুপে অবশ্যই জয়েন থাকতে হবে!</b>\n\n"
             "সবগুলোতে জয়েন করার পর নিচের <b>✅ Verify / যাচাই করুন</b> বাটনে ক্লিক করুন:"
         ),
         "verify_btn": "✅ Verify / যাচাই করুন",
-        "not_joined": "❌ আপনি এখনো সব চ্যানেল ও গ্রুপে জয়েন করেননি! ৫টিতেই জয়েন করে আবার চেষ্টা করুন।",
+        "not_joined": "❌ আপনি এখনো সব চ্যানেল ও গ্রুপে জয়েন করেননি! সবগুলোতে জয়েন করে আবার চেষ্টা করুন।",
         "bot_locked_screen": (
             "😇 <b>নিচের বাটন থেকে অপশন নির্বাচন করুন এবং চ্যানেলে নিজের পোল তৈরি করুন।</b>\n\n"
             "🔒 বটটি আনলক করতে কমপক্ষে <b>১ জন বন্ধুকে</b> রেফার করুন!\n"
@@ -233,11 +231,11 @@ TEXTS = {
     "en": {
         "choose_lang": "🌐 Please select your language / অনুগ্রহ করে আপনার ভাষা নির্বাচন করুন:",
         "force_join": (
-            "⚠️ <b>You must join all 5 required channels & groups below to use this bot!</b>\n\n"
+            "⚠️ <b>You must join the required channel & group below to use this bot!</b>\n\n"
             "After joining all of them, click the <b>✅ Verify Joined</b> button below:"
         ),
         "verify_btn": "✅ Verify Joined",
-        "not_joined": "❌ You haven't joined all 5 required channels/groups yet! Please join all and try again.",
+        "not_joined": "❌ You haven't joined the required channel/group yet! Please join and try again.",
         "bot_locked_screen": (
             "😇 <b>Select an option below to create your channel poll.</b>\n\n"
             "🔒 Refer at least <b>1 friend</b> to unlock the bot!\n"
@@ -607,7 +605,6 @@ def background_watcher():
             now = time.time()
             tick += 1
 
-            # প্রতি ২০ সেকেন্ড পরপর যদি নতুন ভোট বা ডাটা পরিবর্তন হয়ে থাকে, @optchannel6 এ ব্যাকআপ সিঙ্ক করবে
             if backup_dirty:
                 push_backup_to_telegram()
 
@@ -620,7 +617,6 @@ def background_watcher():
                     announce_poll_winner(pid, auto_closed=True)
                     continue
 
-                # প্রতি ৬০ সেকেন্ড পরপর অ্যান্টি-লিভ অডিট
                 if tick % 3 == 0:
                     ch_id = poll.get("channel_id")
                     removed_in_poll = False
@@ -1421,18 +1417,15 @@ def cb_edit_delete(call):
 # ================= RECOVER OLD STOPPED POLL COMMAND =================
 @bot.message_handler(commands=["recoverpoll"])
 def cmd_recover_old_poll(message):
-    """আগে থেকে চ্যানেলে পড়ে থাকা পুরনো পোলটি ঠিক যেখান থেকে বন্ধ হয়েছিল সেখান থেকেই পুনরায় চালু করার কমান্ড"""
     if message.from_user.id != ADMIN_ID:
         return
-    # ফরম্যাট: /recoverpoll @channelusername | Poll_ID | Message_ID | প্রশ্ন | প্রার্থী১:ভোট&প্রার্থী২:ভোট
     raw = message.text.replace("/recoverpoll", "", 1).strip()
     parts = [p.strip() for p in raw.split("|")]
     if len(parts) != 5 or not parts[2].isdigit():
         bot.reply_to(
             message,
             "♻️ <b>পুরনো আটকে থাকা পোল পুনরায় চালু করার ফরম্যাট:</b>\n\n"
-            "<code>/recoverpoll @channel | 101 | 45 | পোলের প্রশ্ন | Rafim:15&amp;Siam:12</code>\n\n"
-            "*(এখানে `101` = বাটনের Poll ID, `45` = চ্যানেল পোস্টের Message ID, এবং `Rafim:15` = আগের ভোট সংখ্যা)*"
+            "<code>/recoverpoll @channel | 101 | 45 | পোলের প্রশ্ন | Rafim:15&amp;Siam:12</code>"
         )
         return
 
@@ -1626,7 +1619,7 @@ def cb_admin(call):
     act = call.data.split(":")[1]
     if act == "backup":
         push_backup_to_telegram()
-        bot.answer_callback_query(call.id, "✅ Cloud Backup @optchannel6 এ সেভ হয়েছে!", show_alert=True)
+        bot.answer_callback_query(call.id, "✅ Cloud Backup সেভ হয়েছে!", show_alert=True)
     elif act in ["boost", "cut"]:
         if not db["polls"]:
             bot.send_message(ADMIN_ID, "বর্তমানে কোনো পোল নেই।")
@@ -1649,7 +1642,7 @@ def cb_admin(call):
             f"👑 VIP Users: <code>{len(db['vip_users'])}</code>\n"
             f"🗳 Total Polls: <code>{total_p}</code>\n"
             f"❤️ Total Votes: <code>{total_v}</code>\n"
-            f"💾 Cloud Backup: <b>Active (@optchannel6)</b>"
+            f"💾 Cloud Backup: <b>Active (Private)</b>"
         )
     elif act == "users":
         lines = ["👥 <b>Recent Users & Referrals:</b>\n"]
