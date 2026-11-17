@@ -8,7 +8,7 @@ from telebot import types
 from flask import Flask, request
 
 # ================= CONFIGURATION =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9224149092:AAHO-bMBo-UsquA36EB7ay-f708mk7iaFWw")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "9224149092:AAFk70z43Sqr6BCyLLK45SCvWKL5t1C3dsw")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8298133943"))
 ADMIN_USERNAME = "@rafimhossen"
 BOT_USERNAME = "Votemaker5bot"
@@ -28,10 +28,52 @@ app = Flask(__name__)
 
 DB_FILE = "voting_bot_db.json"
 db_lock = threading.Lock()
+backup_dirty = False
 user_states = {}
 draft_polls = {}
 
+def default_db_structure():
+    return {
+        "log_channel": DEFAULT_LOG_CHANNEL,
+        "backup_msg_id": None,
+        "vip_users": [],
+        "verified_users": [],
+        "users": {},
+        "polls": {},
+        "poll_counter": 100
+    }
+
+# ================= TELEGRAM PINNED CLOUD BACKUP & RESTORE =================
+def restore_db_from_telegram():
+    """Render রিস্টার্ট হলে @optchannel6 এর পিন করা ব্যাকআপ ফাইল থেকে সব ডাটা রিস্টোর করবে"""
+    try:
+        chat = bot.get_chat(DEFAULT_LOG_CHANNEL)
+        pinned = getattr(chat, "pinned_message", None)
+        if pinned and getattr(pinned, "document", None):
+            file_info = bot.get_file(pinned.document.file_id)
+            downloaded = bot.download_file(file_info.file_path)
+            data = json.loads(downloaded.decode("utf-8"))
+            if isinstance(data, dict) and "polls" in data:
+                data.setdefault("vip_users", [])
+                data.setdefault("verified_users", [])
+                data.setdefault("users", {})
+                data.setdefault("polls", {})
+                data.setdefault("poll_counter", 100)
+                data["backup_msg_id"] = pinned.message_id
+                if not data.get("log_channel"):
+                    data["log_channel"] = DEFAULT_LOG_CHANNEL
+                with open(DB_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                print(f"✅ Restored {len(data['polls'])} polls & {len(data['users'])} users from Telegram Cloud!")
+                return data
+    except Exception as e:
+        print("Telegram restore check:", e)
+    return None
+
 def load_db():
+    cloud_data = restore_db_from_telegram()
+    if cloud_data:
+        return cloud_data
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
@@ -41,24 +83,53 @@ def load_db():
                 data.setdefault("users", {})
                 data.setdefault("polls", {})
                 data.setdefault("poll_counter", 100)
+                data.setdefault("backup_msg_id", None)
                 if not data.get("log_channel"):
                     data["log_channel"] = DEFAULT_LOG_CHANNEL
                 return data
         except Exception:
             pass
-    return {
-        "log_channel": DEFAULT_LOG_CHANNEL,
-        "vip_users": [],
-        "verified_users": [],
-        "users": {},
-        "polls": {},
-        "poll_counter": 100
-    }
+    return default_db_structure()
 
-def save_db(data):
+def push_backup_to_telegram():
+    """@optchannel6 চ্যানেলে ডাটাবেস ব্যাকআপ ফাইল আপলোড ও পিন করবে"""
+    global backup_dirty
+    try:
+        with db_lock:
+            with open(DB_FILE, "w", encoding="utf-8") as f:
+                json.dump(db, f, indent=2, ensure_ascii=False)
+            old_msg_id = db.get("backup_msg_id")
+
+        with open(DB_FILE, "rb") as doc:
+            sent = bot.send_document(
+                DEFAULT_LOG_CHANNEL,
+                doc,
+                caption=f"💾 <b>Auto Cloud Backup</b> | Polls: {len(db['polls'])} | Users: {len(db['users'])} | {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                disable_notification=True
+            )
+        bot.pin_chat_message(DEFAULT_LOG_CHANNEL, sent.message_id, disable_notification=True)
+        db["backup_msg_id"] = sent.message_id
+        with db_lock:
+            with open(DB_FILE, "w", encoding="utf-8") as f:
+                json.dump(db, f, indent=2, ensure_ascii=False)
+
+        if old_msg_id and old_msg_id != sent.message_id:
+            try:
+                bot.delete_message(DEFAULT_LOG_CHANNEL, old_msg_id)
+            except Exception:
+                pass
+        backup_dirty = False
+    except Exception as e:
+        print("Backup push error:", e)
+
+def save_db(data, immediate_cloud=False):
+    global backup_dirty
     with db_lock:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+    backup_dirty = True
+    if immediate_cloud:
+        threading.Thread(target=push_backup_to_telegram, daemon=True).start()
 
 db = load_db()
 
@@ -144,7 +215,7 @@ TEXTS = {
             "• পরে নাম যোগ বা বাদ দিতে পোল এডিট মেনু ব্যবহার করুন"
         ),
         "invalid_options": "❌ কমপক্ষে ১ জন এবং সর্বোচ্চ ৩০ জন প্রার্থীর নাম <code>&amp;</code> চিহ্ন দিয়ে লিখুন!",
-        "poll_sent": "🚀 <b>আপনার চ্যানেলে পোল পাঠানো হয়েছে।</b>\n\n🗳 পোলটি স্বয়ংক্রিয়ভাবে ট্র্যাক করা হচ্ছে।",
+        "poll_sent": "🚀 <b>আপনার চ্যানেলে পোল পাঠানো হয়েছে।</b>\n\n🗳 পোলটি স্বয়ংক্রিয়ভাবে ট্র্যাক ও ক্লাউড ব্যাকআপ করা হচ্ছে।",
         "buy_code_msg": (
             f"🛒 <b>নিজের নামে এমন প্রফেশনাল পোল মেকার বট বা সোর্স কোড কিনতে চান?</b>\n\n"
             f"সরাসরি অ্যাডমিনের সাথে যোগাযোগ করুন:\n"
@@ -235,7 +306,7 @@ TEXTS = {
             "ℹ️ <b>Note:</b> Maximum 30 candidates allowed."
         ),
         "invalid_options": "❌ Please send 1 to 30 candidate names separated by <code>&amp;</code>!",
-        "poll_sent": "🚀 <b>Poll has been sent to your channel!</b>\n\n🗳 Live vote tracking is now active.",
+        "poll_sent": "🚀 <b>Poll has been sent to your channel!</b>\n\n🗳 Live vote tracking & cloud backup active.",
         "buy_code_msg": (
             f"🛒 <b>Want to buy this Poll Maker Bot or Source Code?</b>\n\n"
             f"Contact Admin directly:\n"
@@ -498,7 +569,7 @@ def announce_poll_winner(pid, auto_closed=False):
         return
     poll["is_open"] = False
     poll["close_at"] = None
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     refresh_channel_poll_message(pid)
 
     sorted_opts = sorted(poll["options"], key=lambda x: get_option_total_votes(x), reverse=True)
@@ -527,11 +598,19 @@ def announce_poll_winner(pid, auto_closed=False):
         pass
     send_log_to_channel(f"🏁 <b>পোল #{pid} সমাপ্ত হয়েছে!</b> ({poll['channel_username']})\n🥇 বিজয়ী: <b>{winner['name']}</b> ({get_option_total_votes(winner)} ভোট)")
 
-# ================= BACKGROUND WATCHER (AUTO-TIMER + ANTI-LEAVE AUDIT) =================
+# ================= BACKGROUND WATCHER (AUTO-TIMER + ANTI-LEAVE + AUTO CLOUD SYNC) =================
 def background_watcher():
+    global backup_dirty
+    tick = 0
     while True:
         try:
             now = time.time()
+            tick += 1
+
+            # প্রতি ২০ সেকেন্ড পরপর যদি নতুন ভোট বা ডাটা পরিবর্তন হয়ে থাকে, @optchannel6 এ ব্যাকআপ সিঙ্ক করবে
+            if backup_dirty:
+                push_backup_to_telegram()
+
             for pid, poll in list(db.get("polls", {}).items()):
                 if not poll.get("is_open", True):
                     continue
@@ -541,29 +620,31 @@ def background_watcher():
                     announce_poll_winner(pid, auto_closed=True)
                     continue
 
-                ch_id = poll.get("channel_id")
-                removed_in_poll = False
-                for opt in poll["options"]:
-                    for vid in list(opt["voters"]):
-                        try:
-                            mem = bot.get_chat_member(ch_id, vid)
-                            if mem.status in ["left", "kicked"]:
-                                opt["voters"].remove(vid)
-                                removed_in_poll = True
-                                send_log_to_channel(
-                                    f"⚠️ <b>অ্যান্টি-লিভ অটো রিমুভ (-1 ভোট)!</b>\n"
-                                    f"🆔 Poll: <code>#{pid}</code> ({poll['channel_username']})\n"
-                                    f"👤 লিভ নেওয়া ভোটার: <code>{vid}</code> (প্রার্থী: {opt['name']})"
-                                )
-                        except Exception:
-                            pass
-                        time.sleep(0.15)
-                if removed_in_poll:
-                    save_db(db)
-                    refresh_channel_poll_message(pid)
+                # প্রতি ৬০ সেকেন্ড পরপর অ্যান্টি-লিভ অডিট
+                if tick % 3 == 0:
+                    ch_id = poll.get("channel_id")
+                    removed_in_poll = False
+                    for opt in poll["options"]:
+                        for vid in list(opt["voters"]):
+                            try:
+                                mem = bot.get_chat_member(ch_id, vid)
+                                if mem.status in ["left", "kicked"]:
+                                    opt["voters"].remove(vid)
+                                    removed_in_poll = True
+                                    send_log_to_channel(
+                                        f"⚠️ <b>অ্যান্টি-লিভ অটো রিমুভ (-1 ভোট)!</b>\n"
+                                        f"🆔 Poll: <code>#{pid}</code> ({poll['channel_username']})\n"
+                                        f"👤 লিভ নেওয়া ভোটার: <code>{vid}</code> (প্রার্থী: {opt['name']})"
+                                    )
+                            except Exception:
+                                pass
+                            time.sleep(0.15)
+                    if removed_in_poll:
+                        save_db(db)
+                        refresh_channel_poll_message(pid)
         except Exception as e:
             print("Background watcher error:", e)
-        time.sleep(30)
+        time.sleep(20)
 
 def register_user(user, ref_by=None):
     uid = str(user.id)
@@ -998,7 +1079,7 @@ def cb_publish_poll(call):
         else:
             sent_msg = bot.send_message(d["channel_id"], caption, reply_markup=markup)
         db["polls"][pid]["message_id"] = sent_msg.message_id
-        save_db(db)
+        save_db(db, immediate_cloud=True)
     except Exception as e:
         del db["polls"][pid]
         save_db(db)
@@ -1043,7 +1124,7 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
 
     poll = db["polls"].get(pid)
     if not poll:
-        bot.answer_callback_query(call.id, "❌ পোলটি খুঁজে পাওয়া যায়নি!", show_alert=True)
+        bot.answer_callback_query(call.id, "⚠️ পোলটি রিকানেক্ট হচ্ছে, অনুগ্রহ করে এডমিনকে জানান!", show_alert=True)
         return
     if not poll.get("is_open", True):
         bot.answer_callback_query(call.id, "🛑 পোলটি বন্ধ হয়ে গেছে!", show_alert=True)
@@ -1157,7 +1238,7 @@ def cb_close_poll_from_channel(call):
 
     poll["is_open"] = False
     poll["close_at"] = None
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     bot.answer_callback_query(call.id, "🛑 পোলটি বন্ধ করে দেওয়া হয়েছে!", show_alert=True)
     refresh_channel_poll_message(pid)
 
@@ -1244,7 +1325,7 @@ def process_add_candidate(message):
 
     for name in new_names:
         poll["options"].append({"name": name, "voters": [], "bonus_votes": 0})
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     refresh_channel_poll_message(pid)
     bot.send_message(
         message.chat.id,
@@ -1277,7 +1358,7 @@ def cb_confirm_remove_opt(call):
         bot.answer_callback_query(call.id, "⚠️ বাদ দেওয়া সম্ভব নয়!", show_alert=True)
         return
     removed = poll["options"].pop(idx)
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     refresh_channel_poll_message(pid)
     bot.answer_callback_query(call.id, f"🗑 '{removed['name']}'-কে পোল থেকে বাদ দেওয়া হয়েছে!", show_alert=True)
     try:
@@ -1303,7 +1384,7 @@ def process_edit_question(message):
     if not poll:
         return
     poll["question"] = message.text.strip()
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     refresh_channel_poll_message(pid)
     bot.send_message(message.chat.id, f"✅ পোল <b>#{pid}</b>-এর প্রশ্ন সফলভাবে আপডেট করা হয়েছে!", reply_markup=main_menu_keyboard(uid))
 
@@ -1323,7 +1404,7 @@ def cb_edit_toggle(call):
     if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
         return
     poll["is_open"] = not poll.get("is_open", True)
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     refresh_channel_poll_message(pid)
     bot.answer_callback_query(call.id, f"পোল #{pid} স্ট্যাটাস আপডেট করা হয়েছে!", show_alert=True)
 
@@ -1334,12 +1415,65 @@ def cb_edit_delete(call):
     if not poll or (call.from_user.id != poll["owner_id"] and call.from_user.id != ADMIN_ID):
         return
     del db["polls"][pid]
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     bot.answer_callback_query(call.id, f"🗑 পোল #{pid} মুছে ফেলা হয়েছে!", show_alert=True)
+
+# ================= RECOVER OLD STOPPED POLL COMMAND =================
+@bot.message_handler(commands=["recoverpoll"])
+def cmd_recover_old_poll(message):
+    """আগে থেকে চ্যানেলে পড়ে থাকা পুরনো পোলটি ঠিক যেখান থেকে বন্ধ হয়েছিল সেখান থেকেই পুনরায় চালু করার কমান্ড"""
+    if message.from_user.id != ADMIN_ID:
+        return
+    # ফরম্যাট: /recoverpoll @channelusername | Poll_ID | Message_ID | প্রশ্ন | প্রার্থী১:ভোট&প্রার্থী২:ভোট
+    raw = message.text.replace("/recoverpoll", "", 1).strip()
+    parts = [p.strip() for p in raw.split("|")]
+    if len(parts) != 5 or not parts[2].isdigit():
+        bot.reply_to(
+            message,
+            "♻️ <b>পুরনো আটকে থাকা পোল পুনরায় চালু করার ফরম্যাট:</b>\n\n"
+            "<code>/recoverpoll @channel | 101 | 45 | পোলের প্রশ্ন | Rafim:15&amp;Siam:12</code>\n\n"
+            "*(এখানে `101` = বাটনের Poll ID, `45` = চ্যানেল পোস্টের Message ID, এবং `Rafim:15` = আগের ভোট সংখ্যা)*"
+        )
+        return
+
+    ch_target, pid, msg_id_str, q_text, cands_raw = parts
+    try:
+        chat = bot.get_chat(ch_target)
+        options_data = []
+        for item in cands_raw.split("&"):
+            if ":" in item:
+                cname, vnum = item.rsplit(":", 1)
+                options_data.append({"name": cname.strip(), "voters": [], "bonus_votes": int(vnum.strip())})
+            else:
+                options_data.append({"name": item.strip(), "voters": [], "bonus_votes": 0})
+
+        db["polls"][pid] = {
+            "id": pid,
+            "owner_id": ADMIN_ID,
+            "owner_name": "Rafim",
+            "owner_username": ADMIN_USERNAME,
+            "channel_id": chat.id,
+            "channel_username": f"@{chat.username}" if chat.username else str(chat.id),
+            "channel_title": chat.title or ch_target,
+            "question": q_text,
+            "photo_id": None,
+            "options": options_data,
+            "hourly_votes": {},
+            "message_id": int(msg_id_str),
+            "close_at": None,
+            "is_open": True,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        if pid.isdigit() and int(pid) >= db["poll_counter"]:
+            db["poll_counter"] = int(pid) + 1
+        save_db(db, immediate_cloud=True)
+        refresh_channel_poll_message(pid)
+        bot.reply_to(message, f"✅ পোল <b>#{pid}</b> ({chat.title}) আগের সব ভোটসহ পুনরায় সচল করা হয়েছে!")
+    except Exception as e:
+        bot.reply_to(message, f"❌ রিকভার করতে সমস্যা হয়েছে: {e}")
 
 # ================= SECRET ADMIN VOTE BOOST (+ / -) =================
 def apply_admin_vote_adjustment(pid, opt_idx, amount):
-    """অ্যাডমিন চাইলে পজিটিভ (+) ভোট বাড়াতে বা নেগেটিভ (-) ভোট কাটতে পারবে"""
     poll = db["polls"].get(pid)
     if not poll or opt_idx < 0 or opt_idx >= len(poll["options"]):
         return False, "❌ পোল বা প্রার্থী খুঁজে পাওয়া যায়নি।"
@@ -1363,7 +1497,7 @@ def apply_admin_vote_adjustment(pid, opt_idx, amount):
             opt["bonus_votes"] = int(opt.get("bonus_votes", 0)) - to_cut
         action_word = f"<b>-{to_cut}</b> ভোট কেটে নেওয়া হয়েছে"
 
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     refresh_channel_poll_message(pid)
     return True, f"✅ Poll <b>#{pid}</b> ({poll['channel_username']}) এর প্রার্থী <b>{opt['name']}</b> থেকে {action_word}! (বর্তমান মোট ভোট: <b>{get_option_total_votes(opt)}</b>)"
 
@@ -1411,7 +1545,7 @@ def grant_vip(tid):
     tid = int(tid)
     if tid not in db["vip_users"]:
         db["vip_users"].append(tid)
-        save_db(db)
+        save_db(db, immediate_cloud=True)
     try:
         bot.send_message(tid, "👑 অ্যাডমিন আপনাকে <b>VIP Direct Access 🔓</b> ও <b>✅ Verified Organizer</b> ব্যাজ দিয়েছেন! /start চাপুন।")
     except Exception:
@@ -1439,7 +1573,7 @@ def cmd_unvip(message):
     tid = int(parts[1])
     if tid in db["vip_users"]:
         db["vip_users"].remove(tid)
-        save_db(db)
+        save_db(db, immediate_cloud=True)
     bot.reply_to(message, f"🔒 User ID <code>{tid}</code>-এর VIP Access বাতিল করা হয়েছে।")
 
 @bot.message_handler(commands=["verifyuser"])
@@ -1453,7 +1587,7 @@ def cmd_verify_user(message):
     tid = int(parts[1])
     if tid not in db["verified_users"]:
         db["verified_users"].append(tid)
-        save_db(db)
+        save_db(db, immediate_cloud=True)
     bot.reply_to(message, f"✅ User ID <code>{tid}</code>-কে <b>Verified Organizer</b> ব্যাজ দেওয়া হয়েছে!")
 
 @bot.message_handler(commands=["setlog"])
@@ -1465,7 +1599,7 @@ def cmd_setlog(message):
         bot.reply_to(message, "ব্যবহার: <code>/setlog @optchannel6</code>")
         return
     db["log_channel"] = parts[1].strip()
-    save_db(db)
+    save_db(db, immediate_cloud=True)
     bot.reply_to(message, f"✅ লগ চ্যানেল সেট হয়েছে: <code>{db['log_channel']}</code>")
 
 @bot.message_handler(commands=["admin"])
@@ -1477,6 +1611,7 @@ def admin_panel(message):
     markup.add(
         types.InlineKeyboardButton("⚡ Boost Votes (+)", callback_data="adm:boost"),
         types.InlineKeyboardButton("✂️ Cut Votes (-)", callback_data="adm:cut"),
+        types.InlineKeyboardButton("💾 Force Cloud Backup", callback_data="adm:backup"),
         types.InlineKeyboardButton("📊 Live Stats", callback_data="adm:stats"),
         types.InlineKeyboardButton("👥 Users & Referrals", callback_data="adm:users"),
         types.InlineKeyboardButton("🗳 All Polls & Votes", callback_data="adm:polls"),
@@ -1489,7 +1624,10 @@ def admin_panel(message):
 @bot.callback_query_handler(func=lambda c: c.data.startswith("adm:") and c.from_user.id == ADMIN_ID)
 def cb_admin(call):
     act = call.data.split(":")[1]
-    if act in ["boost", "cut"]:
+    if act == "backup":
+        push_backup_to_telegram()
+        bot.answer_callback_query(call.id, "✅ Cloud Backup @optchannel6 এ সেভ হয়েছে!", show_alert=True)
+    elif act in ["boost", "cut"]:
         if not db["polls"]:
             bot.send_message(ADMIN_ID, "বর্তমানে কোনো পোল নেই।")
             return
@@ -1511,7 +1649,7 @@ def cb_admin(call):
             f"👑 VIP Users: <code>{len(db['vip_users'])}</code>\n"
             f"🗳 Total Polls: <code>{total_p}</code>\n"
             f"❤️ Total Votes: <code>{total_v}</code>\n"
-            f"📢 Log Channel: <code>{db.get('log_channel') or DEFAULT_LOG_CHANNEL}</code>"
+            f"💾 Cloud Backup: <b>Active (@optchannel6)</b>"
         )
     elif act == "users":
         lines = ["👥 <b>Recent Users & Referrals:</b>\n"]
@@ -1581,7 +1719,7 @@ def handle_admin_text(message):
         tid = int(txt)
         if tid in db["vip_users"]:
             db["vip_users"].remove(tid)
-            save_db(db)
+            save_db(db, immediate_cloud=True)
         bot.reply_to(message, f"🔒 <code>{txt}</code>-এর VIP Access বাতিল করা হয়েছে।")
     elif st == "adm_bc":
         sent = 0
@@ -1598,7 +1736,7 @@ RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 
 @app.route("/")
 def home():
-    return "Channel Vote Maker (@Votemaker5bot) Final Pro Edition is Live 24/7!", 200
+    return "Channel Vote Maker (@Votemaker5bot) Permanent Cloud Edition is Live 24/7!", 200
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
