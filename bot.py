@@ -12,10 +12,10 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "9224149092:AAGME-O6M8BzELYSa4k-GULcMAps
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8298133943"))
 ADMIN_USERNAME = "@rafimhossen"
 BOT_USERNAME = "Votemaker5bot"
-DEFAULT_LOG_CHANNEL = "@optchannel6"
+DEFAULT_LOG_CHANNEL = "@otpchannrl"
 PROMO_CHANNEL = "@bdgiveaways24"
 
-# শুধুমাত্র মেইন চ্যানেল ও গ্রুপ ফোর্স-জয়েনে রাখা হয়েছে (OTP ও অন্যান্য চ্যানেল বাদ দেওয়া হয়েছে)
+# শুধুমাত্র মেইন চ্যানেল ও গ্রুপ ফোর্স-জয়েনে রাখা হয়েছে (প্রাইভেট ব্যাকআপ চ্যানেল গোপন রাখা হয়েছে)
 REQUIRED_CHATS = [
     {"username": "@bdgiveaways24", "url": "https://t.me/bdgiveaways24", "name": "BD Giveaways 24"},
     {"username": "@bdgivewaychat", "url": "https://t.me/bdgivewaychat", "name": "BD Giveaway Chat"},
@@ -43,7 +43,7 @@ def default_db_structure():
 
 # ================= TELEGRAM PINNED CLOUD BACKUP & RESTORE =================
 def restore_db_from_telegram():
-    """Render রিস্টার্ট হলে প্রাইভেট লগ চ্যানেলের পিন করা ব্যাকআপ ফাইল থেকে সব ডাটা রিস্টোর করবে"""
+    """Render রিস্টার্ট হলে প্রাইভেট লগ চ্যানেলের (@otpchannrl) পিন করা ব্যাকআপ ফাইল থেকে সব ডাটা রিস্টোর করবে"""
     try:
         chat = bot.get_chat(DEFAULT_LOG_CHANNEL)
         pinned = getattr(chat, "pinned_message", None)
@@ -58,8 +58,7 @@ def restore_db_from_telegram():
                 data.setdefault("polls", {})
                 data.setdefault("poll_counter", 100)
                 data["backup_msg_id"] = pinned.message_id
-                if not data.get("log_channel"):
-                    data["log_channel"] = DEFAULT_LOG_CHANNEL
+                data["log_channel"] = DEFAULT_LOG_CHANNEL
                 with open(DB_FILE, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 print(f"✅ Restored {len(data['polls'])} polls & {len(data['users'])} users from Telegram Cloud!")
@@ -82,15 +81,14 @@ def load_db():
                 data.setdefault("polls", {})
                 data.setdefault("poll_counter", 100)
                 data.setdefault("backup_msg_id", None)
-                if not data.get("log_channel"):
-                    data["log_channel"] = DEFAULT_LOG_CHANNEL
+                data["log_channel"] = DEFAULT_LOG_CHANNEL
                 return data
         except Exception:
             pass
     return default_db_structure()
 
 def push_backup_to_telegram():
-    """প্রাইভেট লগ চ্যানেলে ডাটাবেস ব্যাকআপ ফাইল আপলোড ও পিন করবে"""
+    """প্রাইভেট লগ চ্যানেলে (@otpchannrl) ডাটাবেস ব্যাকআপ ফাইল আপলোড ও পিন করবে"""
     global backup_dirty
     try:
         with db_lock:
@@ -1589,7 +1587,7 @@ def cmd_setlog(message):
         return
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        bot.reply_to(message, "ব্যবহার: <code>/setlog @optchannel6</code>")
+        bot.reply_to(message, "ব্যবহার: <code>/setlog @otpchannrl</code>")
         return
     db["log_channel"] = parts[1].strip()
     save_db(db, immediate_cloud=True)
@@ -1619,7 +1617,7 @@ def cb_admin(call):
     act = call.data.split(":")[1]
     if act == "backup":
         push_backup_to_telegram()
-        bot.answer_callback_query(call.id, "✅ Cloud Backup সেভ হয়েছে!", show_alert=True)
+        bot.answer_callback_query(call.id, "✅ Cloud Backup @otpchannrl এ সেভ হয়েছে!", show_alert=True)
     elif act in ["boost", "cut"]:
         if not db["polls"]:
             bot.send_message(ADMIN_ID, "বর্তমানে কোনো পোল নেই।")
@@ -1642,7 +1640,7 @@ def cb_admin(call):
             f"👑 VIP Users: <code>{len(db['vip_users'])}</code>\n"
             f"🗳 Total Polls: <code>{total_p}</code>\n"
             f"❤️ Total Votes: <code>{total_v}</code>\n"
-            f"💾 Cloud Backup: <b>Active (Private)</b>"
+            f"💾 Cloud Backup: <b>Active (@otpchannrl)</b>"
         )
     elif act == "users":
         lines = ["👥 <b>Recent Users & Referrals:</b>\n"]
