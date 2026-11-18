@@ -52,6 +52,7 @@ def default_db_structure():
         "banned_users": [],
         "required_chats": list(DEFAULT_REQUIRED_CHATS),
         "global_notice": "",
+        "pinned_user_msgs": {},
         "maintenance_mode": False,
         "milestone_targets": [100, 500, 1000],
         "suggestions": [],
@@ -620,7 +621,7 @@ def generate_daily_admin_summary():
         f"━━━━━━━━━━━━━━━━━━━━"
     )
 
-# ================= BACKGROUND WATCHER (TIMERS + SCHEDULED POSTS + AUTO-DELETE + DAILY REPORT) =================
+# ================= BACKGROUND WATCHER =================
 def background_watcher():
     global backup_dirty
     tick = 0
@@ -632,7 +633,6 @@ def background_watcher():
             if backup_dirty:
                 push_backup_to_telegram()
 
-            # 1. Midnight Daily Report (Bangladesh UTC+6)
             bd_now = datetime.now(timezone(timedelta(hours=6)))
             today_key = bd_now.strftime("%Y-%m-%d")
             if bd_now.hour == 0 and bd_now.minute < 5 and db.get("last_daily_report_date") != today_key:
@@ -643,7 +643,6 @@ def background_watcher():
                 except Exception:
                     pass
 
-            # 2. Scheduled Channel Posts (#58)
             remaining_sched = []
             sched_changed = False
             for sp in list(db.get("scheduled_posts", [])):
@@ -666,7 +665,6 @@ def background_watcher():
                 db["scheduled_posts"] = remaining_sched
                 save_db(db, immediate_cloud=True)
 
-            # 3. Polls Watcher (Auto-Timer, Auto-Delete 24h after close, Anti-Leave Audit)
             for pid, poll in list(db.get("polls", {}).items()):
                 if not poll.get("is_open", True):
                     del_ts = poll.get("delete_at")
@@ -781,6 +779,17 @@ def send_dashboard(chat_id, user):
         t(user.id, "welcome").format(name=user.first_name, refs=refs, v_badge=v_badge) + notice_block,
         reply_markup=main_menu_keyboard(user.id)
     )
+    if notice:
+        db.setdefault("pinned_user_msgs", {})
+        uid_s = str(user.id)
+        if not db["pinned_user_msgs"].get(uid_s):
+            try:
+                p_msg = bot.send_message(chat_id, f"📌 <b>PINNED NOTICE:</b>\n\n{notice}")
+                bot.pin_chat_message(chat_id, p_msg.message_id, disable_notification=True)
+                db["pinned_user_msgs"][uid_s] = p_msg.message_id
+                save_db(db)
+            except Exception:
+                pass
 
 def passes_gate(message):
     register_user(message.from_user)
@@ -912,6 +921,43 @@ def cb_check_unlock(call):
     else:
         bot.answer_callback_query(call.id, t(call.from_user.id, "still_locked_alert"), show_alert=True)
 
+# ================= GROUP PIN & UNPIN COMMANDS =================
+@bot.message_handler(commands=["pin"])
+def cmd_group_pin_message(message):
+    if message.chat.type not in ["group", "supergroup"]:
+        bot.reply_to(message, "⚠️ এই কমান্ডটি শুধুমাত্র গ্রুপে কাজ করবে!")
+        return
+    try:
+        um = bot.get_chat_member(message.chat.id, message.from_user.id)
+        if um.status not in ["administrator", "creator"] and message.from_user.id != ADMIN_ID:
+            bot.reply_to(message, "🚫 শুধুমাত্র গ্রুপ অ্যাডমিন পিন করতে পারবেন!")
+            return
+        if message.reply_to_message:
+            bot.pin_chat_message(message.chat.id, message.reply_to_message.message_id, disable_notification=False)
+            bot.reply_to(message, "📌 মেসেজটি গ্রুপের সবার চ্যাটে পিন করা হয়েছে!")
+        else:
+            txt = message.text.replace("/pin", "", 1).strip()
+            if not txt:
+                bot.reply_to(message, "ব্যবহার: কোনো মেসেজের রিপ্লাইয়ে <code>/pin</code> লিখুন অথবা <code>/pin আপনার মেসেজ</code> লিখুন।")
+                return
+            sent = bot.send_message(message.chat.id, f"📌 <b>PINNED ANNOUNCEMENT:</b>\n\n{txt}")
+            bot.pin_chat_message(message.chat.id, sent.message_id, disable_notification=False)
+    except Exception as e:
+        bot.reply_to(message, f"❌ পিন করতে সমস্যা হয়েছে (বটকে গ্রুপে Pin Messages পারমিশন দিন): {e}")
+
+@bot.message_handler(commands=["unpin"])
+def cmd_group_unpin_message(message):
+    if message.chat.type not in ["group", "supergroup"]:
+        return
+    try:
+        um = bot.get_chat_member(message.chat.id, message.from_user.id)
+        if um.status not in ["administrator", "creator"] and message.from_user.id != ADMIN_ID:
+            return
+        bot.unpin_chat_message(message.chat.id)
+        bot.reply_to(message, "✅ পিন করা মেসেজটি আনপিন করা হয়েছে!")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {e}")
+
 # ================= CANCEL HANDLER =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_cancel"] for l in TEXTS] + ["/cancel"])
 def handle_cancel_btn(message):
@@ -940,7 +986,6 @@ def menu_refer(message):
         f"🏅 <b>ব্যাজ স্ট্যাটাস:</b> {v_status}{vip_note}"
     )
 
-# VIP Custom Footer (#94)
 @bot.message_handler(commands=["setfooter"])
 def cmd_set_vip_footer(message):
     if not passes_gate(message):
@@ -958,7 +1003,6 @@ def cmd_set_vip_footer(message):
     save_db(db, immediate_cloud=True)
     bot.reply_to(message, "✅ আপনার কাস্টম পোল ফুটার আপডেট হয়েছে!")
 
-# Profile Card (#65) & Hall of Fame (#66)
 @bot.message_handler(commands=["profile", "halloffame"])
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_profile"] for l in TEXTS])
 def menu_profile_and_hof(message):
@@ -1002,7 +1046,6 @@ def cb_show_hall_of_fame(call):
     bot.send_message(call.message.chat.id, "\n".join(lines))
     bot.answer_callback_query(call.id)
 
-# Search Poll (#77)
 @bot.message_handler(commands=["search"])
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_search"] for l in TEXTS])
 def menu_search_poll(message):
@@ -1031,7 +1074,6 @@ def process_search_poll(message):
         lines.append(f"🆔 <b>#{p['id']}</b> ({st}) | {p['channel_username']}\n❓ {p['question'][:50]} — <b>{tv} ভোট</b>\n")
     bot.send_message(message.chat.id, "\n".join(lines), reply_markup=main_menu_keyboard(uid))
 
-# Schedule Post (#58)
 @bot.message_handler(commands=["schedule"])
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_schedule"] for l in TEXTS])
 def menu_schedule_post(message):
@@ -1099,7 +1141,6 @@ def step_sched_minutes(message):
         reply_markup=main_menu_keyboard(uid)
     )
 
-# Support, Feedback (#67) & Rate Bot (#70)
 @bot.message_handler(commands=["suggest", "ratebot"])
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_support"] for l in TEXTS])
 def menu_support_and_rate(message):
@@ -1152,7 +1193,7 @@ def process_user_suggestion(message):
     except Exception:
         pass
 
-# ================= POLL CREATION WIZARD (WITH GOAL #86, BAR STYLE #83, AUTO-DELETE #78) =================
+# ================= POLL CREATION WIZARD =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_create"] for l in TEXTS])
 def menu_create_poll(message):
     if not passes_gate(message):
@@ -1401,7 +1442,7 @@ def cb_publish_poll(call):
         f"❓ প্রশ্ন: {d['question']}"
     )
 
-# ================= LIVE VOTING, MILESTONES (#63), TARGET GOAL (#86), WITHDRAW & CLOSE =================
+# ================= LIVE VOTING, MILESTONES, TARGET GOAL, WITHDRAW & CLOSE =================
 def process_vote_action(call, pid, opt_idx, from_direct=False):
     voter = call.from_user
     vid = voter.id
@@ -1449,7 +1490,6 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
 
     refresh_channel_poll_message(pid)
 
-    # Creator Milestone Alert (#63)
     poll.setdefault("milestones_sent", [])
     for m_target in db.get("milestone_targets", [100, 500, 1000]):
         if poll_total >= m_target and m_target not in poll["milestones_sent"]:
@@ -1460,7 +1500,6 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
             except Exception:
                 pass
 
-    # Target Goal Auto-Winner (#86)
     t_goal = int(poll.get("target_votes", 0))
     if t_goal > 0 and cand_total >= t_goal:
         announce_poll_winner(pid, close_reason=f"🎯 টার্গেট গোল ({t_goal} ভোট) পূর্ণ হওয়ায় অটো সমাপ্ত!")
@@ -1530,7 +1569,7 @@ def cb_close_poll_from_channel(call):
     bot.answer_callback_query(call.id, "🛑 পোলটি বন্ধ করা হয়েছে!", show_alert=True)
     refresh_channel_poll_message(pid)
 
-# ================= FULL EDIT POLLS (WITH CLONE #89 & CO-HOST #64) =================
+# ================= FULL EDIT POLLS =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_edit"] for l in TEXTS])
 def menu_edit_polls(message):
     if not passes_gate(message):
@@ -1567,7 +1606,6 @@ def menu_edit_polls(message):
         markup.add(types.InlineKeyboardButton(f"🗑 ডিলিট #{p['id']}", callback_data=f"editdel:{p['id']}"))
     bot.send_message(message.chat.id, "\n".join(lines), reply_markup=markup)
 
-# One-Click Poll Clone (#89)
 @bot.callback_query_handler(func=lambda c: c.data.startswith("editclone:"))
 def cb_clone_poll(call):
     pid = call.data.split(":")[1]
@@ -1593,7 +1631,6 @@ def cb_clone_poll(call):
     bot.send_message(call.message.chat.id, "♻️ <b>পোল ক্লোন রেডি! নিচে দেখে চ্যানেলে পাঠিয়ে দিন:</b>\n\n" + text, reply_markup=markup)
     bot.answer_callback_query(call.id)
 
-# Add Co-Host (#64)
 @bot.callback_query_handler(func=lambda c: c.data.startswith("editcohost:"))
 def cb_add_cohost_prompt(call):
     pid = call.data.split(":")[1]
@@ -1812,7 +1849,7 @@ def cmd_admin_vote_adjust(message):
     ok, msg = apply_admin_vote_adjustment(pid, opt_idx, amt)
     bot.reply_to(message, msg)
 
-# ================= ULTIMATE 15-FEATURE ADMIN CONTROL PANEL =================
+# ================= ULTIMATE ADMIN CONTROL PANEL =================
 @bot.message_handler(commands=["admin"])
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_admin"] for l in TEXTS] and m.from_user.id == ADMIN_ID)
 def admin_panel(message):
@@ -1823,7 +1860,7 @@ def admin_panel(message):
     markup.add(
         types.InlineKeyboardButton("⚡ Boost Votes (+)", callback_data="adm:boost"),
         types.InlineKeyboardButton("✂️ Cut Votes (-)", callback_data="adm:cut"),
-        types.InlineKeyboardButton("📢 Global Notice (#1)", callback_data="adm:notice"),
+        types.InlineKeyboardButton("📌 Global Notice & Pin (#1)", callback_data="adm:notice"),
         types.InlineKeyboardButton("📬 Feedback Inbox (#2)", callback_data="adm:feedback"),
         types.InlineKeyboardButton("⭐ Bot Ratings (#3)", callback_data="adm:ratings"),
         types.InlineKeyboardButton("🚫 Ban / Unban (#4)", callback_data="adm:ban_menu"),
@@ -1843,7 +1880,7 @@ def admin_panel(message):
         types.InlineKeyboardButton("🔒 Remove VIP", callback_data="adm:rem_vip"),
         types.InlineKeyboardButton("📢 Broadcast All", callback_data="adm:broadcast")
     )
-    bot.send_message(message.chat.id, "👑 <b>Rafim Ultimate Admin Control Panel (All 15 Tools Active)</b>", reply_markup=markup)
+    bot.send_message(message.chat.id, "👑 <b>Rafim Ultimate Admin Control Panel</b>", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("adm:") and c.from_user.id == ADMIN_ID)
 def cb_admin(call):
@@ -1862,7 +1899,7 @@ def cb_admin(call):
     elif act == "notice":
         user_states[ADMIN_ID] = "adm_set_notice"
         cur = db.get("global_notice") or "None"
-        bot.send_message(ADMIN_ID, f"📢 <b>বর্তমান নোটিশ:</b> {cur}\n\nনতুন গ্লোবাল নোটিশ লিখুন (মুছে ফেলতে <code>off</code> লিখুন):")
+        bot.send_message(ADMIN_ID, f"📌 <b>বর্তমান পিন করা নোটিশ:</b>\n{cur}\n\nনতুন নোটিশ লিখুন (সবার চ্যাটে অটো-পিন হবে, আর আনপিন করতে <code>off</code> লিখুন):")
 
     elif act == "feedback":
         sugs = db.get("suggestions", [])[-10:]
@@ -2048,9 +2085,38 @@ def handle_admin_states(message):
         bot.reply_to(message, f"🔒 <code>{tid}</code>-এর VIP বাতিল হয়েছে।")
 
     elif st == "adm_set_notice":
-        db["global_notice"] = "" if txt.lower() == "off" else txt
-        save_db(db, immediate_cloud=True)
-        bot.reply_to(message, "✅ গ্লোবাল নোটিশ আপডেট হয়েছে!")
+        db.setdefault("pinned_user_msgs", {})
+        if txt.lower() == "off":
+            db["global_notice"] = ""
+            unpinned = 0
+            for uid_s, mid in list(db["pinned_user_msgs"].items()):
+                try:
+                    bot.unpin_chat_message(int(uid_s), mid)
+                    unpinned += 1
+                except Exception:
+                    pass
+            db["pinned_user_msgs"] = {}
+            save_db(db, immediate_cloud=True)
+            bot.reply_to(message, f"🔓 নোটিশ বন্ধ এবং <b>{unpinned}</b> জন ইউজারের চ্যাট থেকে পিন খুলে দেওয়া হয়েছে!")
+        else:
+            db["global_notice"] = txt
+            pinned_cnt = 0
+            for uid_s in list(db["users"].keys()):
+                try:
+                    old_mid = db["pinned_user_msgs"].get(uid_s)
+                    if old_mid:
+                        try:
+                            bot.unpin_chat_message(int(uid_s), old_mid)
+                        except Exception:
+                            pass
+                    p_msg = bot.send_message(int(uid_s), f"📌 <b>PINNED ANNOUNCEMENT:</b>\n\n{txt}")
+                    bot.pin_chat_message(int(uid_s), p_msg.message_id, disable_notification=False)
+                    db["pinned_user_msgs"][uid_s] = p_msg.message_id
+                    pinned_cnt += 1
+                except Exception:
+                    pass
+            save_db(db, immediate_cloud=True)
+            bot.reply_to(message, f"📌 নোটিশ সেট হয়েছে এবং <b>{pinned_cnt}</b> জন ইউজারের চ্যাটে উপরে পিন করে রাখা হয়েছে!")
 
     elif st == "adm_ban_toggle" and txt.isdigit():
         tid = int(txt)
