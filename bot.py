@@ -8,10 +8,10 @@ from telebot import types
 from flask import Flask, request
 
 # ================= CONFIGURATION =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9224149092:AAGME-O6M8BzELYSa4k-GULcMApsO2hACQo")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "9212807383:AAHLJ-VqVQulZo-Hczfg2j56XuP_eieEg9A")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8298133943"))
 ADMIN_USERNAME = "@rafimhossen"
-BOT_USERNAME = "Votemaker5bot"
+BOT_USERNAME = "@VoteCreate_bot"
 DEFAULT_LOG_CHANNEL = "@otpchannrl"
 PROMO_CHANNEL = "@bdgiveaways24"
 
