@@ -11,7 +11,8 @@ from flask import Flask, request
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9212807383:AAHLJ-VqVQulZo-Hczfg2j56XuP_eieEg9A")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8298133943"))
 ADMIN_USERNAME = "@rafimhossen"
-BOT_USERNAME = "@VoteCreate_bot"
+BOT_USERNAME_RAW = os.environ.get("BOT_USERNAME", "@VoteCreate_bot")
+BOT_USERNAME = BOT_USERNAME_RAW.lstrip("@")
 DEFAULT_LOG_CHANNEL = "@otpchannrl"
 PROMO_CHANNEL = "@bdgiveaways24"
 
@@ -155,6 +156,9 @@ TEXTS = {
         "check_unlock_btn": "🔄 Check Unlock",
         "still_locked_alert": "❌ এখনো ১টি রেফার পূর্ণ হয়নি!",
         "welcome": "😇 <b>স্বাগতম {name}!</b>\nনিচের বাটন থেকে অপশন নির্বাচন করুন এবং চ্যানেলে পোল তৈরি করুন।\n\n🔓 <b>স্ট্যাটাস:</b> আনলকড ✅ | 👥 <b>রেফার:</b> {refs} জন{v_badge}",
+        "btn_connect": "🔗 CONNECT",
+        "btn_create_hub": "⚡ CREATE",
+        "btn_manage": "⚙️ MANAGE",
         "btn_create": "📣 চ্যানেল পোল তৈরি",
         "btn_edit": "✏️ পোল এডিট",
         "btn_profile": "🌟 প্রোফাইল ও হল অফ ফেম",
@@ -166,9 +170,10 @@ TEXTS = {
         "btn_admin": "👑 Admin Panel",
         "btn_cancel": "❌ Cancel",
         "btn_text_only": "🟢 শুধুমাত্র লেখা",
-        "create_prompt_inline": "😇 নিচের বাটনে চাপ দিয়ে নতুন পোল তৈরি শুরু করুন:",
-        "create_now_btn": "🗳 Create Now Poll 🚀",
-        "ask_channel": "📢 <b>আপনার চ্যানেল বা গ্রুপের লিংক / @username / ID পাঠান:</b>\n\n⚠️ আপনাকে ওই চ্যানেলের <b>Owner/Admin</b> হতে হবে এবং বটকেও <b>Admin</b> রাখতে হবে।",
+        "create_prompt_inline": "😇 নিচের বাটনে চাপ দিয়ে পোল তৈরির ধরণ নির্বাচন করুন:",
+        "create_together_btn": "📋 সবার নাম একসাথে করে পুল",
+        "create_separate_btn": "🪪 সবার নাম আলাদা আলাদা করে পুল",
+        "ask_channel": "⚡ <b>চ্যানেল তথ্য পাঠান:</b>\n\nPublic: <code>@username</code>\nPrivate: <code>-1001234567890</code>\n\n⚠️ আপনাকে ওই চ্যানেলের <b>Owner/Admin</b> হতে হবে এবং বটকেও <b>Admin</b> রাখতে হবে।",
         "not_bot_admin": "❌ <b>Error! বটটি ওই চ্যানেলে Admin নয় অথবা চ্যানেল পাওয়া যায়নি।</b> আবার চেষ্টা করুন:",
         "not_user_admin": "🚫 <b>অ্যাক্সেস প্রত্যাখ্যাত! আপনি এই চ্যানেলের Admin বা Owner নন।</b>",
         "ask_question": "❓ <b>আপনার পোলের প্রশ্ন/শিরোনাম লিখে পাঠান:</b>",
@@ -176,7 +181,7 @@ TEXTS = {
         "btn_q_ok": "✅ হ্যাঁ, ঠিক আছে",
         "btn_q_rewrite": "✏️ আবার লিখুন",
         "ask_photo": "📸 <b>পোলের জন্য ছবি/ব্যানার পাঠান</b> (অথবা <b>\"🟢 শুধুমাত্র লেখা\"</b> চাপুন):",
-        "ask_options": "📋 <b>প্রার্থীদের নাম <code>&amp;</code> চিহ্ন দিয়ে লিখুন</b> (সর্বোচ্চ ৩০ জন):\nউদাহরণ: <code>নাম ১&amp;নাম ২&amp;নাম ৩</code>",
+        "ask_options": "📋 <b>প্রার্থীদের নাম <code>&amp;</code> চিহ্ন দিয়ে লিখুন</b> (সর্বোচ্চ ৩০ জন):\nউদাহরণ: <code>নাম ১&amp;নাম ২&amp;নাম ৩</code>\n\n💡 <i>আলাদা কার্ড পোলে চাইলে আইডি/নোটও লিখতে পারেন, যেমন:</i> <code>JOSH | 8959056383&amp;Forwordboy | 8843448815</code>",
         "invalid_options": "❌ ১ থেকে ৩০ জন প্রার্থীর নাম <code>&amp;</code> দিয়ে লিখুন!",
         "poll_sent": "🚀 <b>আপনার চ্যানেলে পোল পাঠানো হয়েছে!</b>",
         "withdraw_btn": "🔄 ভোট প্রত্যাহার",
@@ -193,6 +198,9 @@ TEXTS = {
         "check_unlock_btn": "🔄 Check Unlock",
         "still_locked_alert": "❌ You still need 1 referral!",
         "welcome": "😇 <b>Welcome {name}!</b>\nCreate and manage live channel polls effortlessly.\n\n🔓 <b>Status:</b> Unlocked ✅ | 👥 <b>Referrals:</b> {refs}{v_badge}",
+        "btn_connect": "🔗 CONNECT",
+        "btn_create_hub": "⚡ CREATE",
+        "btn_manage": "⚙️ MANAGE",
         "btn_create": "📣 Create Poll",
         "btn_edit": "✏️ Edit Polls",
         "btn_profile": "🌟 Profile & Hall of Fame",
@@ -204,9 +212,10 @@ TEXTS = {
         "btn_admin": "👑 Admin Panel",
         "btn_cancel": "❌ Cancel",
         "btn_text_only": "🟢 Text Only",
-        "create_prompt_inline": "😇 Click below to create a new channel poll:",
-        "create_now_btn": "🗳 Create Now Poll 🚀",
-        "ask_channel": "📢 <b>Send your channel/group @username, link, or ID:</b>",
+        "create_prompt_inline": "😇 Choose how you want to create your channel poll:",
+        "create_together_btn": "📋 All Names Together Poll",
+        "create_separate_btn": "🪪 Separate Card Poll (Each Name)",
+        "ask_channel": "⚡ <b>Send your channel information:</b>\n\nPublic: <code>@username</code>\nPrivate: <code>-1001234567890</code>",
         "not_bot_admin": "❌ <b>Bot is not Admin there or chat not found.</b> Try again:",
         "not_user_admin": "🚫 <b>Access Denied! You are not an Admin/Owner of this chat.</b>",
         "ask_question": "❓ <b>Send your poll question/title:</b>",
@@ -214,7 +223,7 @@ TEXTS = {
         "btn_q_ok": "✅ Yes, Proceed",
         "btn_q_rewrite": "✏️ Rewrite",
         "ask_photo": "📸 <b>Send a banner photo</b> (or click <b>\"🟢 Text Only\"</b>):",
-        "ask_options": "📋 <b>Send candidate names separated by <code>&amp;</code></b> (max 30):",
+        "ask_options": "📋 <b>Send candidate names separated by <code>&amp;</code></b> (max 30):\nExample: <code>Name 1&amp;Name 2&amp;Name 3</code>",
         "invalid_options": "❌ Send 1 to 30 names separated by <code>&amp;</code>!",
         "poll_sent": "🚀 <b>Poll has been published to your channel!</b>",
         "withdraw_btn": "🔄 Withdraw Vote",
@@ -231,6 +240,9 @@ TEXTS = {
         "check_unlock_btn": "🔄 Check Unlock",
         "still_locked_alert": "❌ अभी 1 रेफरल पूरा नहीं हुआ है!",
         "welcome": "😇 <b>स्वागत है {name}!</b>\nनीचे दिए गए बटन से अपना चैनल पोल बनाएं।\n\n🔓 <b>स्टेटस:</b> अनलॉक ✅ | 👥 <b>रेफरल:</b> {refs}{v_badge}",
+        "btn_connect": "🔗 CONNECT",
+        "btn_create_hub": "⚡ CREATE",
+        "btn_manage": "⚙️ MANAGE",
         "btn_create": "📣 नया पोल बनाएं",
         "btn_edit": "✏️ पोल एडिट करें",
         "btn_profile": "🌟 प्रोफ़ाइल और रिकॉर्ड",
@@ -242,9 +254,10 @@ TEXTS = {
         "btn_admin": "👑 Admin Panel",
         "btn_cancel": "❌ Cancel",
         "btn_text_only": "🟢 केवल टेक्स्ट",
-        "create_prompt_inline": "😇 नया पोल बनाने के लिए नीचे क्लिक करें:",
-        "create_now_btn": "🗳 Create Now Poll 🚀",
-        "ask_channel": "📢 <b>अपने चैनल या ग्रुप का @username या ID भेजें:</b>",
+        "create_prompt_inline": "😇 पोल बनाने का प्रकार चुनें:",
+        "create_together_btn": "📋 सभी नाम एक साथ पोल",
+        "create_separate_btn": "🪪 सभी नाम अलग-अलग कार्ड पोल",
+        "ask_channel": "⚡ <b>चैनल जानकारी भेजें:</b>\n\nPublic: <code>@username</code>\nPrivate: <code>-1001234567890</code>",
         "not_bot_admin": "❌ <b>बॉट इस चैनल में एडमिन नहीं है।</b> पुनः प्रयास करें:",
         "not_user_admin": "🚫 <b>आप इस चैनल के एडमिन या ओनर नहीं हैं।</b>",
         "ask_question": "❓ <b>अपने पोल का प्रश्न भेजें:</b>",
@@ -269,6 +282,9 @@ TEXTS = {
         "check_unlock_btn": "🔄 تحقق من الفتح",
         "still_locked_alert": "❌ تحتاج إلى دعوة صديق واحد أولاً!",
         "welcome": "😇 <b>مرحباً {name}!</b>\nأنشئ استطلاعات احترافية لقناتك بسهولة.\n\n🔓 <b>الحالة:</b> مفعل ✅ | 👥 <b>الدعوات:</b> {refs}{v_badge}",
+        "btn_connect": "🔗 CONNECT",
+        "btn_create_hub": "⚡ CREATE",
+        "btn_manage": "⚙️ MANAGE",
         "btn_create": "📣 إنشاء استطلاع",
         "btn_edit": "✏️ تعديل الاستطلاعات",
         "btn_profile": "🌟 الملف الشخصي",
@@ -280,9 +296,10 @@ TEXTS = {
         "btn_admin": "👑 Admin Panel",
         "btn_cancel": "❌ إلغاء",
         "btn_text_only": "🟢 نص فقط",
-        "create_prompt_inline": "😇 اضغط أدناه لإنشاء استطلاع جديد:",
-        "create_now_btn": "🗳 Create Now Poll 🚀",
-        "ask_channel": "📢 <b>أرسل معرف القناة أو المجموعة (@username أو ID):</b>",
+        "create_prompt_inline": "😇 اختر نوع الاستطلاع الذي تريد إنشاءه:",
+        "create_together_btn": "📋 استطلاع الأسماء معاً",
+        "create_separate_btn": "🪪 استطلاع بطاقات منفصلة لكل اسم",
+        "ask_channel": "⚡ <b>أرسل معلومات القناة:</b>\n\nPublic: <code>@username</code>\nPrivate: <code>-1001234567890</code>",
         "not_bot_admin": "❌ <b>البوت ليس مشرفاً في هذه القناة.</b> حاول مرة أخرى:",
         "not_user_admin": "🚫 <b>لست مشرفاً في هذه القناة.</b>",
         "ask_question": "❓ <b>أرسل سؤال الاستطلاع:</b>",
@@ -357,6 +374,8 @@ def get_option_total_votes(opt):
 
 def main_menu_keyboard(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row(t(user_id, "btn_connect"))
+    markup.row(t(user_id, "btn_create_hub"), t(user_id, "btn_manage"))
     markup.row(t(user_id, "btn_create"), t(user_id, "btn_edit"))
     markup.row(t(user_id, "btn_profile"), t(user_id, "btn_search"))
     markup.row(t(user_id, "btn_schedule"), t(user_id, "btn_refer"))
@@ -425,6 +444,54 @@ def get_rank_medals(options):
             medals[idx] = "🔥"
     return medals
 
+# ================= SEPARATE CARD POLL HELPERS =================
+def parse_option_entry(raw_entry):
+    if "|" in raw_entry:
+        parts = [p.strip() for p in raw_entry.split("|", 1)]
+        return parts[0] or "Participant", parts[1]
+    return raw_entry.strip(), ""
+
+def build_separate_card_text(poll, opt_idx):
+    opt = poll["options"][opt_idx]
+    v_count = get_option_total_votes(opt)
+    ch_title = poll.get("channel_title", "Channel")
+    extra_id = f"\n💌 <b>ID:</b> <code>{opt['extra_id']}</code>" if opt.get("extra_id") else ""
+    closed_tag = "\n\n🛑 <b>[VOTING CLOSED]</b>" if not poll.get("is_open", True) else ""
+    return (
+        f"<b>{ch_title}</b>\n"
+        f"😎 <b>Name:</b> {opt['name']}{extra_id}\n"
+        f"🗳 <b>Votes:</b> <code>{v_count}</code>"
+        f"{closed_tag}"
+    )
+
+def build_separate_card_markup(poll_id, opt_idx):
+    poll = db["polls"][poll_id]
+    opt = poll["options"][opt_idx]
+    v_count = get_option_total_votes(opt)
+    is_open = poll.get("is_open", True)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if is_open:
+        markup.add(types.InlineKeyboardButton(f"Vote - {v_count}", callback_data=f"pvote:{poll_id}:{opt_idx}"))
+    else:
+        markup.add(types.InlineKeyboardButton(f"🔒 Closed | Votes - {v_count}", callback_data=f"pclosed:{poll_id}"))
+    return markup
+
+def refresh_separate_cards(pid):
+    poll = db["polls"].get(pid)
+    if not poll or poll.get("poll_mode") != "separate":
+        return
+    card_ids = poll.get("card_message_ids", [])
+    for idx, msg_id in enumerate(card_ids):
+        if idx >= len(poll["options"]) or not msg_id:
+            continue
+        txt = build_separate_card_text(poll, idx)
+        mk = build_separate_card_markup(pid, idx)
+        try:
+            bot.edit_message_text(txt, poll["channel_id"], msg_id, reply_markup=mk)
+        except Exception:
+            pass
+
+# ================= TOGETHER POLL HELPERS =================
 def build_channel_poll_caption(poll_id):
     poll = db["polls"][poll_id]
     total_votes = sum(get_option_total_votes(o) for o in poll["options"])
@@ -492,7 +559,12 @@ def build_channel_poll_markup(poll_id):
 
 def refresh_channel_poll_message(pid):
     poll = db["polls"].get(pid)
-    if not poll or not poll.get("message_id"):
+    if not poll:
+        return
+    if poll.get("poll_mode") == "separate":
+        refresh_separate_cards(pid)
+        return
+    if not poll.get("message_id"):
         return
     caption = build_channel_poll_caption(pid)
     if not poll.get("is_open", True):
@@ -965,6 +1037,24 @@ def handle_cancel_btn(message):
     draft_polls.pop(message.from_user.id, None)
     bot.send_message(message.chat.id, t(message.from_user.id, "cancelled"), reply_markup=main_menu_keyboard(message.from_user.id))
 
+# ================= CONNECT / CREATE HUB / MANAGE SHORTCUTS =================
+@bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_connect"] for l in TEXTS])
+def menu_connect_channel(message):
+    if not passes_gate(message):
+        return
+    uid = message.from_user.id
+    user_states[uid] = "step_channel"
+    draft_polls[uid] = {"poll_mode": "together", "timer_hours": 0, "target_votes": 0, "bar_style": "classic", "auto_delete_24h": False}
+    bot.send_message(message.chat.id, t(uid, "ask_channel"), reply_markup=cancel_keyboard(uid))
+
+@bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_create_hub"] for l in TEXTS])
+def menu_create_hub(message):
+    menu_create_poll(message)
+
+@bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_manage"] for l in TEXTS])
+def menu_manage_hub(message):
+    menu_edit_polls(message)
+
 # ================= MENU BUTTONS & NEW FEATURES =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_lang"] for l in TEXTS])
 def menu_lang(message):
@@ -1193,28 +1283,40 @@ def process_user_suggestion(message):
     except Exception:
         pass
 
-# ================= POLL CREATION WIZARD =================
+# ================= POLL CREATION WIZARD (TOGETHER + SEPARATE CARD MODES) =================
 @bot.message_handler(func=lambda m: m.text in [TEXTS[l]["btn_create"] for l in TEXTS])
 def menu_create_poll(message):
     if not passes_gate(message):
         return
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(t(message.from_user.id, "create_now_btn"), callback_data="start_poll_wizard"))
-    bot.send_message(message.chat.id, t(message.from_user.id, "create_prompt_inline"), reply_markup=markup)
+    uid = message.from_user.id
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton(t(uid, "create_together_btn"), callback_data="start_poll_wizard:together"),
+        types.InlineKeyboardButton(t(uid, "create_separate_btn"), callback_data="start_poll_wizard:separate")
+    )
+    bot.send_message(message.chat.id, t(uid, "create_prompt_inline"), reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda c: c.data == "start_poll_wizard")
+@bot.callback_query_handler(func=lambda c: c.data.startswith("start_poll_wizard"))
 def cb_start_wizard(call):
     if not check_all_joined(call.from_user.id) or not is_unlocked(call.from_user.id):
         return
     uid = call.from_user.id
+    mode = call.data.split(":")[1] if ":" in call.data else "together"
     user_states[uid] = "step_channel"
-    draft_polls[uid] = {"timer_hours": 0, "target_votes": 0, "bar_style": "classic", "auto_delete_24h": False}
-    bot.send_message(call.message.chat.id, t(uid, "ask_channel"), reply_markup=cancel_keyboard(uid))
+    draft_polls[uid] = {
+        "poll_mode": mode,
+        "timer_hours": 0,
+        "target_votes": 0,
+        "bar_style": "classic",
+        "auto_delete_24h": False
+    }
+    mode_lbl = "🪪 আলাদা আলাদা কার্ড পোল" if mode == "separate" else "📋 সবার নাম একসাথে পোল"
+    bot.send_message(call.message.chat.id, f"✨ <b>মোড:</b> {mode_lbl}\n\n" + t(uid, "ask_channel"), reply_markup=cancel_keyboard(uid))
 
 @bot.message_handler(func=lambda m: user_states.get(m.from_user.id) == "step_channel", content_types=["text"])
 def wizard_step_channel(message):
     uid = message.from_user.id
-    draft_polls.setdefault(uid, {"timer_hours": 0, "target_votes": 0, "bar_style": "classic", "auto_delete_24h": False})
+    draft_polls.setdefault(uid, {"poll_mode": "together", "timer_hours": 0, "target_votes": 0, "bar_style": "classic", "auto_delete_24h": False})
     target = message.text.strip()
     if "t.me/" in target:
         target = "@" + target.split("t.me/")[-1].strip("/")
@@ -1283,14 +1385,19 @@ def wizard_step_photo(message):
 
 def build_draft_preview(uid):
     d = draft_polls[uid]
-    cands_list = "\n".join([f"👤 {idx+1}. {name}" for idx, name in enumerate(d["options"])])
+    cands_list = "\n".join([
+        f"👤 {idx+1}. {item['name']}" + (f" (ID: {item['extra_id']})" if item.get("extra_id") else "")
+        for idx, item in enumerate(d["options"])
+    ])
     hrs = d.get("timer_hours", 0)
     goal = d.get("target_votes", 0)
     bs = d.get("bar_style", "classic")
     adel = "হ্যাঁ ✅" if d.get("auto_delete_24h") else "না"
+    mode_lbl = "🪪 আলাদা আলাদা কার্ড" if d.get("poll_mode") == "separate" else "📋 সবার নাম একসাথে"
 
     text = (
         f"📊 <b>পোলের ফাইনাল প্রিভিউ:</b>\n\n"
+        f"🎛️ <b>ধরণ:</b> {mode_lbl}\n"
         f"📣 <b>চ্যানেল:</b> {d['channel_title']} ({d['channel_username']})\n"
         f"❓ <b>প্রশ্ন:</b> {d['question']}\n"
         f"⏳ <b>টাইমার:</b> {f'{hrs}h' if hrs else 'Manual'} | 🎯 <b>ভোট গোল:</b> {f'{goal} ভোট' if goal else 'Off'}\n"
@@ -1325,11 +1432,15 @@ def wizard_step_options(message):
     uid = message.from_user.id
     if uid not in draft_polls:
         return
-    raw_names = [name.strip() for name in message.text.split("&") if name.strip()]
-    if not raw_names or len(raw_names) > 30:
+    raw_items = [name.strip() for name in message.text.split("&") if name.strip()]
+    if not raw_items or len(raw_items) > 30:
         bot.send_message(message.chat.id, t(uid, "invalid_options"), reply_markup=cancel_keyboard(uid))
         return
-    draft_polls[uid]["options"] = raw_names
+    parsed_opts = []
+    for raw_item in raw_items:
+        cname, eid = parse_option_entry(raw_item)
+        parsed_opts.append({"name": cname, "extra_id": eid})
+    draft_polls[uid]["options"] = parsed_opts
     user_states[uid] = "step_final_preview"
     text, markup = build_draft_preview(uid)
     bot.send_message(message.chat.id, text, reply_markup=markup)
@@ -1379,11 +1490,21 @@ def cb_publish_poll(call):
     pid = str(db["poll_counter"])
     hrs = d.get("timer_hours", 0)
     close_at = (time.time() + hrs * 3600) if hrs > 0 else None
+    poll_mode = d.get("poll_mode", "together")
 
     creator_uname = f"@{call.from_user.username}" if call.from_user.username else "No Username"
-    options_data = [{"name": name, "voters": [], "bonus_votes": 0} for name in d["options"]]
+    options_data = [
+        {
+            "name": item["name"],
+            "extra_id": item.get("extra_id", ""),
+            "voters": [],
+            "bonus_votes": 0
+        }
+        for item in d["options"]
+    ]
     db["polls"][pid] = {
         "id": pid,
+        "poll_mode": poll_mode,
         "owner_id": uid,
         "owner_name": call.from_user.first_name,
         "owner_username": creator_uname,
@@ -1394,6 +1515,7 @@ def cb_publish_poll(call):
         "question": d["question"],
         "photo_id": d.get("photo_id"),
         "options": options_data,
+        "card_message_ids": [],
         "hourly_votes": {},
         "milestones_sent": [],
         "target_votes": d.get("target_votes", 0),
@@ -1406,14 +1528,29 @@ def cb_publish_poll(call):
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
-    caption = build_channel_poll_caption(pid)
-    markup = build_channel_poll_markup(pid)
     try:
-        if d.get("photo_id"):
-            sent_msg = bot.send_photo(d["channel_id"], d["photo_id"], caption=caption, reply_markup=markup)
+        if poll_mode == "separate":
+            if d.get("photo_id"):
+                banner_msg = bot.send_photo(d["channel_id"], d["photo_id"], caption=f"🗳 <b>{d['question']}</b>")
+                db["polls"][pid]["message_id"] = banner_msg.message_id
+            card_ids = []
+            for idx in range(len(options_data)):
+                card_txt = build_separate_card_text(db["polls"][pid], idx)
+                card_mk = build_separate_card_markup(pid, idx)
+                sent_card = bot.send_message(d["channel_id"], card_txt, reply_markup=card_mk)
+                card_ids.append(sent_card.message_id)
+                if not db["polls"][pid].get("message_id"):
+                    db["polls"][pid]["message_id"] = sent_card.message_id
+            db["polls"][pid]["card_message_ids"] = card_ids
         else:
-            sent_msg = bot.send_message(d["channel_id"], caption, reply_markup=markup)
-        db["polls"][pid]["message_id"] = sent_msg.message_id
+            caption = build_channel_poll_caption(pid)
+            markup = build_channel_poll_markup(pid)
+            if d.get("photo_id"):
+                sent_msg = bot.send_photo(d["channel_id"], d["photo_id"], caption=caption, reply_markup=markup)
+            else:
+                sent_msg = bot.send_message(d["channel_id"], caption, reply_markup=markup)
+            db["polls"][pid]["message_id"] = sent_msg.message_id
+
         save_db(db, immediate_cloud=True)
     except Exception as e:
         del db["polls"][pid]
@@ -1432,11 +1569,11 @@ def cb_publish_poll(call):
     ])
     bot.send_message(
         call.message.chat.id,
-        f"{t(uid, 'poll_sent')}\n\n🔗 <b>ডিরেক্ট ভোট লিংকসমূহ:</b>\n{direct_links_list}",
+        f"{t(uid, 'poll_sent')} (Mode: <code>{poll_mode}</code>)\n\n🔗 <b>ডিরেক্ট ভোট লিংকসমূহ:</b>\n{direct_links_list}",
         reply_markup=main_menu_keyboard(uid)
     )
     send_log_to_channel(
-        f"🆕 <b>নতুন পোল তৈরি হয়েছে! (Poll #{pid})</b>\n"
+        f"🆕 <b>নতুন পোল তৈরি হয়েছে! (Poll #{pid} | {poll_mode})</b>\n"
         f"👤 ক্রিয়েটর: {call.from_user.first_name} ({creator_uname} | <code>{uid}</code>)\n"
         f"📢 চ্যানেল: {d['channel_title']} ({d['channel_username']})\n"
         f"❓ প্রশ্ন: {d['question']}"
@@ -1473,7 +1610,7 @@ def process_vote_action(call, pid, opt_idx, from_direct=False):
             return
 
     poll["options"][opt_idx]["voters"].append(vid)
-    if not from_direct:
+    if not from_direct and poll.get("poll_mode") != "separate":
         poll["message_id"] = call.message.message_id
 
     hour_key = datetime.now().strftime("%I %p")
@@ -1585,7 +1722,8 @@ def menu_edit_polls(message):
     for p in my_polls[-8:]:
         st = "🟢 চালু" if p.get("is_open", True) else "🔴 বন্ধ"
         tv = sum(get_option_total_votes(o) for o in p["options"])
-        lines.append(f"🆔 <b>#{p['id']}</b> ({st}) — {p['channel_username']} | মোট ভোট: <b>{tv}</b>")
+        m_tag = "🪪" if p.get("poll_mode") == "separate" else "📋"
+        lines.append(f"🆔 <b>#{p['id']}</b> {m_tag} ({st}) — {p['channel_username']} | মোট ভোট: <b>{tv}</b>")
         btn_txt = f"🛑 বন্ধ #{p['id']}" if p.get("is_open", True) else f"🟢 চালু #{p['id']}"
         markup.add(
             types.InlineKeyboardButton(f"➕ নাম যোগ #{p['id']}", callback_data=f"editadd:{p['id']}"),
@@ -1614,13 +1752,14 @@ def cb_clone_poll(call):
         return
     uid = call.from_user.id
     draft_polls[uid] = {
+        "poll_mode": old_p.get("poll_mode", "together"),
         "channel_id": old_p["channel_id"],
         "channel_username": old_p["channel_username"],
         "channel_title": old_p["channel_title"],
         "user_role": "Admin",
         "question": old_p["question"],
         "photo_id": old_p.get("photo_id"),
-        "options": [o["name"] for o in old_p["options"]],
+        "options": [{"name": o["name"], "extra_id": o.get("extra_id", "")} for o in old_p["options"]],
         "timer_hours": 0,
         "target_votes": old_p.get("target_votes", 0),
         "bar_style": old_p.get("bar_style", "classic"),
@@ -1685,12 +1824,21 @@ def process_add_candidate(message):
     poll = db["polls"].get(pid)
     if not poll:
         return
-    new_names = [n.strip() for n in message.text.split("&") if n.strip()]
-    if not new_names or len(poll["options"]) + len(new_names) > 30:
+    new_items = [n.strip() for n in message.text.split("&") if n.strip()]
+    if not new_items or len(poll["options"]) + len(new_items) > 30:
         bot.send_message(message.chat.id, "❌ সঠিক নাম দিন (সর্বোচ্চ ৩০ জন)!", reply_markup=main_menu_keyboard(uid))
         return
-    for name in new_names:
-        poll["options"].append({"name": name, "voters": [], "bonus_votes": 0})
+    for raw_item in new_items:
+        cname, eid = parse_option_entry(raw_item)
+        poll["options"].append({"name": cname, "extra_id": eid, "voters": [], "bonus_votes": 0})
+        if poll.get("poll_mode") == "separate":
+            new_idx = len(poll["options"]) - 1
+            sent_card = bot.send_message(
+                poll["channel_id"],
+                build_separate_card_text(poll, new_idx),
+                reply_markup=build_separate_card_markup(pid, new_idx)
+            )
+            poll.setdefault("card_message_ids", []).append(sent_card.message_id)
     save_db(db, immediate_cloud=True)
     refresh_channel_poll_message(pid)
     bot.send_message(message.chat.id, f"✅ পোল <b>#{pid}</b>-এ নতুন নাম যুক্ত হয়েছে!", reply_markup=main_menu_keyboard(uid))
@@ -1714,6 +1862,12 @@ def cb_confirm_remove_opt(call):
     if not poll or not can_manage_poll(poll, call.from_user.id) or len(poll["options"]) <= 1 or idx >= len(poll["options"]):
         return
     removed = poll["options"].pop(idx)
+    if poll.get("poll_mode") == "separate" and idx < len(poll.get("card_message_ids", [])):
+        old_mid = poll["card_message_ids"].pop(idx)
+        try:
+            bot.delete_message(poll["channel_id"], old_mid)
+        except Exception:
+            pass
     save_db(db, immediate_cloud=True)
     refresh_channel_poll_message(pid)
     bot.answer_callback_query(call.id, f"🗑 '{removed['name']}'-কে বাদ দেওয়া হয়েছে!", show_alert=True)
@@ -1791,15 +1945,15 @@ def cmd_recover_old_poll(message):
         for item in cands_raw.split("&"):
             if ":" in item:
                 cname, vnum = item.rsplit(":", 1)
-                options_data.append({"name": cname.strip(), "voters": [], "bonus_votes": int(vnum.strip())})
+                options_data.append({"name": cname.strip(), "extra_id": "", "voters": [], "bonus_votes": int(vnum.strip())})
             else:
-                options_data.append({"name": item.strip(), "voters": [], "bonus_votes": 0})
+                options_data.append({"name": item.strip(), "extra_id": "", "voters": [], "bonus_votes": 0})
         db["polls"][pid] = {
-            "id": pid, "owner_id": ADMIN_ID, "owner_name": "Rafim", "owner_username": ADMIN_USERNAME,
+            "id": pid, "poll_mode": "together", "owner_id": ADMIN_ID, "owner_name": "Rafim", "owner_username": ADMIN_USERNAME,
             "co_hosts": [], "channel_id": chat.id,
             "channel_username": f"@{chat.username}" if chat.username else str(chat.id),
             "channel_title": chat.title or ch_target, "question": q_text, "photo_id": None,
-            "options": options_data, "hourly_votes": {}, "milestones_sent": [],
+            "options": options_data, "card_message_ids": [], "hourly_votes": {}, "milestones_sent": [],
             "target_votes": 0, "bar_style": "classic", "auto_delete_24h": False, "delete_at": None,
             "message_id": int(msg_id_str), "close_at": None, "is_open": True,
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -2183,7 +2337,7 @@ RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 
 @app.route("/")
 def home():
-    return "Channel Vote Maker (@Votemaker5bot) Ultra Pro 2026 Edition is Live 24/7!", 200
+    return "Channel Vote Maker Ultra Pro 2026 Edition is Live 24/7!", 200
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -2198,7 +2352,10 @@ def setup_webhook_async():
         bot.remove_webhook()
         time.sleep(1)
         if RENDER_URL:
-            bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}", allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"])
+            bot.set_webhook(
+                url=f"{RENDER_URL}/{BOT_TOKEN}",
+                allowed_updates=["message", "callback_query", "chat_member", "my_chat_member"]
+            )
     except Exception as e:
         print("Webhook error:", e)
 
